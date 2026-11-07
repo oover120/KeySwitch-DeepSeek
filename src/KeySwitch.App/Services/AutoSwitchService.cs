@@ -116,6 +116,12 @@ public sealed class AutoSwitchService : IDisposable
     private volatile bool _hasPendingWord;
     private bool _disposed;
 
+    /// <summary>
+    /// Окно, о котором уже сообщили, что оно исключено. Нужно, чтобы причина «здесь не работаем»
+    /// попадала в журнал один раз на окно, а не на каждое нажатие.
+    /// </summary>
+    private IntPtr _skipLoggedFor;
+
     // Очередь нажатий: хук кладёт — рабочий поток разбирает. Порядок сохраняется,
     // поэтому буфер слова всегда видит клавиши в том же порядке, в каком их нажали.
     private readonly BlockingCollection<KeyWorkItem> _keys = new(new ConcurrentQueue<KeyWorkItem>());
@@ -408,6 +414,7 @@ public sealed class AutoSwitchService : IDisposable
         var mode = ResolveMode(info);
         if (mode == ExceptionMode.Disabled || IsGameOrProtected(info))
         {
+            LogWindowSkip(info, mode);
             ResetState();
             return;
         }
@@ -496,6 +503,12 @@ public sealed class AutoSwitchService : IDisposable
         // Поле пароля — не трогаем вообще: ни буфера, ни переключений.
         if (_tracker.IsPasswordField(_settings.PasswordProtectionEnabled))
         {
+            if (_skipLoggedFor != info.Handle)
+            {
+                _skipLoggedFor = info.Handle;
+                _logger.Info($"Поле пароля: proc={info.ProcessName} — ввод не обрабатывается.");
+            }
+
             _passwordLike = true;
             _engine.Reset();
             _hasPendingWord = false;
@@ -549,6 +562,8 @@ public sealed class AutoSwitchService : IDisposable
         _passwordLike = false;
         _hasPendingWord = false;
 
+        LogWordDecision(info, result, auto);
+
         if (result.Plan is not { } plan || !auto)
         {
             // Нажатие перехвачено, но исправлять нечего — возвращаем Enter/Tab в окно,
@@ -560,6 +575,41 @@ public sealed class AutoSwitchService : IDisposable
 
         _executor.ExecutePlan(plan, info.Handle, info.ProcessName);
         PlayFixSound();
+    }
+
+    /// <summary>
+    /// Пишет в журнал, почему окно целиком исключено из автопереключения. Без этой строки
+    /// «ничего не происходит» выглядит одинаково для всех причин сразу.
+    /// </summary>
+    private void LogWindowSkip(ForegroundWindowInfo info, ExceptionMode mode)
+    {
+        if (_skipLoggedFor == info.Handle)
+            return;
+
+        _skipLoggedFor = info.Handle;
+        bool game = IsGameOrProtected(info);
+        _logger.Info(
+            $"Окно исключено: proc={info.ProcessName} режим={mode} fullscreen={info.IsFullscreen} " +
+            $"игра_или_защищено={game} elevated={info.IsElevated}");
+    }
+
+    /// <summary>
+    /// Решение по завершённому слову. Текст набора в журнал не попадает никогда — только длина,
+    /// раскладка и причина решения (безопасный режим, п.13 ТЗ).
+    /// </summary>
+    private void LogWordDecision(ForegroundWindowInfo info, EngineResult result, bool auto)
+    {
+        if (result.Word is not { } word)
+            return;
+
+        var plan = result.Plan;
+        _logger.Info(
+            $"Слово: proc={info.ProcessName} символов={word.Text.Length} раскладка={word.LayoutId} " +
+            $"авто={(auto ? "да" : "нет")} решение={(plan is null ? "оставить" : "исправить")} " +
+            $"причина={result.Note ?? "-"}" +
+            (plan is null
+                ? string.Empty
+                : $" уверенность={plan.Confidence:0.00} цель={plan.TargetLayoutId}"));
     }
 
     private void HandlePause()

@@ -66,6 +66,10 @@ public partial class App : Application
             ThemeManager.EnsureInitialized(_host.Settings.Theme);
 
             _logger.Info($"KeySwitch запущен (v{typeof(App).Assembly.GetName().Version}).");
+            // Путь к исполняемому файлу — единственный надёжный способ понять, какая именно
+            // сборка сейчас работает: на машине могут одновременно лежать несколько копий,
+            // и все они пишут в один и тот же журнал.
+            _logger.Info($"Файл приложения: {Environment.ProcessPath}");
             if (_host.Settings.SafeMode)
                 _logger.Warn("Безопасный режим: перехват клавиатуры отключён.");
 

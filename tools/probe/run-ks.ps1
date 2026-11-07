@@ -12,6 +12,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$repo = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
 
 Add-Type -TypeDefinition @"
@@ -84,7 +85,7 @@ $root = Join-Path $env:TEMP 'ksprobe'
 New-Item -ItemType Directory -Force -Path $root | Out-Null
 $appData = Join-Path $env:APPDATA 'KeySwitch'
 $logPath = Join-Path $appData 'logs\keyswitch.log'
-$exe = 'C:\Users\User\Desktop\Project\CarambaDeepSeek\src\KeySwitch.App\bin\Release\net8.0-windows\win-x64\KeySwitch.exe'
+$exe = Join-Path $repo 'src\KeySwitch.App\bin\Release\net8.0-windows\win-x64\KeySwitch.exe'
 
 $consoleHwnd = (Get-Process -Id $PID).MainWindowHandle
 if ($consoleHwnd -ne 0) { [void][W]::ShowWindow($consoleHwnd, 6) }
