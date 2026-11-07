@@ -3,7 +3,9 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
     <RootNamespace>KeySwitch.App</RootNamespace>
-    <AssemblyName>KeySwitch</AssemblyName>
+    <AssemblyName>KeySwitchDeepSeek</AssemblyName>
+    <AssemblyTitle>KeySwitch DeepSeek</AssemblyTitle>
+    <Description>Автоматический переключатель раскладки клавиатуры RU↔EN для Windows 11</Description>
     <UseWPF>true</UseWPF>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Resources\keyswitch.ico</ApplicationIcon>

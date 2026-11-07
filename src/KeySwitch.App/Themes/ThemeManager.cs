@@ -21,7 +21,7 @@ public static class ThemeManager
     private const int DwmwcpRound = 2;
 
     private static readonly string ThemeAssemblyName =
-        typeof(ThemeManager).Assembly.GetName().Name ?? "KeySwitch";
+        typeof(ThemeManager).Assembly.GetName().Name ?? "KeySwitchDeepSeek";
 
     /// <summary>
     /// Абсолютный pack-URI словаря темы. Относительный «Themes/...» WPF разрешает

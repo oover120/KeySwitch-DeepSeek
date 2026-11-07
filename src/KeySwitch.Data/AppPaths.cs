@@ -2,13 +2,13 @@ namespace KeySwitch.Data;
 
 /// <summary>
 /// Расположение пользовательских файлов KeySwitch. По умолчанию всё лежит в
-/// <c>%APPDATA%\KeySwitch</c>; тесты и портативные сценарии создают объект с другим корнем.
+/// <c>%APPDATA%\KeySwitchDeepSeek</c>; тесты и портативные сценарии создают объект с другим корнем.
 /// Пути не создаются до вызова <see cref="EnsureCreated"/>, чтобы слой данных можно было
 /// конструировать где угодно, не трогая диск.
 /// </summary>
 public sealed class AppPaths
 {
-    /// <summary>Корень по умолчанию: <c>%APPDATA%\KeySwitch</c>.</summary>
+    /// <summary>Корень по умолчанию: <c>%APPDATA%\KeySwitchDeepSeek</c>.</summary>
     public static AppPaths Default { get; } = new(DefaultRoot());
 
     public AppPaths(string root)
@@ -60,6 +60,6 @@ public sealed class AppPaths
                 : Path.Combine(userProfile, ".config");
         }
 
-        return Path.Combine(appData, "KeySwitch");
+        return Path.Combine(appData, "KeySwitchDeepSeek");
     }
 }

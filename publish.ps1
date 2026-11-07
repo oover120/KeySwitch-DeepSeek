@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Builds KeySwitch into a single self-contained exe and places it in artifacts\publish.
+    Builds KeySwitch DeepSeek into a single self-contained exe and places it in artifacts\publish.
 
 .DESCRIPTION
     Publish settings: Release, win-x64, self-contained, single-file with embedded native
@@ -46,7 +46,7 @@ $project = Join-Path $root 'src\KeySwitch.App\KeySwitch.App.csproj'
 $testProject = Join-Path $root 'src\KeySwitch.Tests\KeySwitch.Tests.csproj'
 $artifacts = Join-Path $root 'artifacts'
 $publishDir = Join-Path $artifacts 'publish'
-$exeName = 'KeySwitch.exe'
+$exeName = 'KeySwitchDeepSeek.exe'
 
 function Get-ProjectVersion {
     param([string]$PropsFile)
@@ -63,7 +63,7 @@ function Get-ProjectVersion {
 
 $version = Get-ProjectVersion -PropsFile (Join-Path $root 'Directory.Build.props')
 
-Write-Host "KeySwitch $version - publishing ($Configuration, $RuntimeIdentifier)" -ForegroundColor Cyan
+Write-Host "KeySwitch DeepSeek $version - publishing ($Configuration, $RuntimeIdentifier)" -ForegroundColor Cyan
 
 # Clean the previous publish output so stale files never leak into the single-file bundle.
 if (Test-Path -LiteralPath $publishDir) {
@@ -109,7 +109,7 @@ Get-ChildItem -LiteralPath $publishDir -File | ForEach-Object {
 }
 
 if ($Zip) {
-    $zipPath = Join-Path $artifacts ("KeySwitch-{0}-{1}.zip" -f $version, $RuntimeIdentifier)
+    $zipPath = Join-Path $artifacts ("KeySwitchDeepSeek-{0}-{1}.zip" -f $version, $RuntimeIdentifier)
     if (Test-Path -LiteralPath $zipPath) {
         Remove-Item -LiteralPath $zipPath -Force
     }
@@ -118,4 +118,4 @@ if ($Zip) {
     Write-Host "Archive: $zipPath" -ForegroundColor Green
 }
 
-Write-Host 'Installer: compile installer\KeySwitch.iss with Inno Setup 6 (Compile).' -ForegroundColor DarkGray
+Write-Host 'Installer: compile installer\KeySwitchDeepSeek.iss with Inno Setup 6 (Compile).' -ForegroundColor DarkGray

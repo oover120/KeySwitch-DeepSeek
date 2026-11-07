@@ -1,6 +1,8 @@
+using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using KeySwitch.App.Localization;
 using Control = System.Windows.Controls.Control;
 using Cursors = System.Windows.Input.Cursors;
 using KeyEventArgs = System.Windows.Input.KeyEventArgs;
@@ -21,7 +23,7 @@ public class HotkeyBox : Control
 
     private static readonly DependencyPropertyKey DisplayTextPropertyKey =
         DependencyProperty.RegisterReadOnly(nameof(DisplayText), typeof(string), typeof(HotkeyBox),
-            new PropertyMetadata("Не задано"));
+            new PropertyMetadata(string.Empty));
 
     public static readonly DependencyProperty DisplayTextProperty = DisplayTextPropertyKey.DependencyProperty;
 
@@ -37,6 +39,23 @@ public class HotkeyBox : Control
             Focus();
             e.Handled = true;
         };
+
+        Loaded += (_, _) =>
+        {
+            Loc.Instance.PropertyChanged += OnLocalizationChanged;
+            UpdateDisplayText();
+        };
+        Unloaded += (_, _) => Loc.Instance.PropertyChanged -= OnLocalizationChanged;
+
+        UpdateDisplayText();
+    }
+
+    private void OnLocalizationChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (string.IsNullOrEmpty(e.PropertyName))
+        {
+            UpdateDisplayText();
+        }
     }
 
     /// <summary>Сочетание в формате <c>Ctrl+Shift+Space</c>; пустая строка — не задано.</summary>
@@ -204,11 +223,11 @@ public class HotkeyBox : Control
         if (_capturing)
         {
             string pending = ModifiersPrefix();
-            text = pending.Length == 0 ? "Нажмите сочетание…" : pending + "…";
+            text = pending.Length == 0 ? Loc.T("hotkey.press") : pending + "…";
         }
         else
         {
-            text = string.IsNullOrWhiteSpace(Value) ? "Не задано" : Value;
+            text = string.IsNullOrWhiteSpace(Value) ? Loc.T("hotkey.notSet") : Value;
         }
 
         SetValue(DisplayTextPropertyKey, text);

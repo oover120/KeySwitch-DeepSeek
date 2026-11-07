@@ -13,8 +13,8 @@ namespace KeySwitch.Hooks;
 public static class ElevationHelper
 {
     private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
-    private const string RunValueName = "KeySwitch";
-    private const string TaskName = "KeySwitch";
+    private const string RunValueName = "KeySwitchDeepSeek";
+    private const string TaskName = "KeySwitchDeepSeek";
 
     /// <summary>Запущен ли текущий процесс с повышенными правами (UAC).</summary>
     public static bool IsProcessElevated => IsElevatedProcess(Environment.ProcessId);
@@ -79,7 +79,7 @@ public static class ElevationHelper
 
     // ------------------------------------------------------------ HKCU Run
 
-    /// <summary>Есть ли значение "KeySwitch" в HKCU\...\Run.</summary>
+    /// <summary>Есть ли значение "KeySwitchDeepSeek" в HKCU\...\Run.</summary>
     public static bool IsRunKeyAutostartEnabled()
     {
         try
@@ -121,7 +121,7 @@ public static class ElevationHelper
 
     // ------------------------------------------------------------ Планировщик
 
-    /// <summary>Зарегистрирована ли задача планировщика с именем "KeySwitch".</summary>
+    /// <summary>Зарегистрирована ли задача планировщика с именем "KeySwitchDeepSeek".</summary>
     public static bool IsScheduledAutostartEnabled()
     {
         return RunSchtasks($"/Query /TN \"{TaskName}\"") == 0;

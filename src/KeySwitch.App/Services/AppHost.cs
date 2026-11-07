@@ -1,3 +1,4 @@
+using KeySwitch.App.Localization;
 using KeySwitch.App.Themes;
 using KeySwitch.App.Tray;
 using KeySwitch.App.ViewModels;
@@ -231,9 +232,8 @@ public sealed class AppHost : IDisposable
         {
             _logger.Error("Не удалось запустить перехват клавиатуры", ex);
             _tray.ShowBalloon(
-                "KeySwitch",
-                "Не удалось запустить перехват клавиатуры. Автопереключение недоступно, " +
-                "настройки и трей работают.",
+                Loc.T("app.name"),
+                Loc.T("balloon.hook.failed"),
                 TrayBalloonIcon.Error);
         }
     }
@@ -428,7 +428,7 @@ public sealed class AppHost : IDisposable
             _logger.Error("Не удалось сохранить настройки при выходе", ex);
         }
 
-        _logger.Info("KeySwitch завершил работу.");
+        _logger.Info("KeySwitch DeepSeek завершил работу.");
         _logger.Flush();
     }
 }

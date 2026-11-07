@@ -1,6 +1,8 @@
+using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Threading;
+using KeySwitch.App.Localization;
 using KeySwitch.App.Tray;
 using KeySwitch.Data;
 using KeySwitch.Hooks;
@@ -188,6 +190,10 @@ public sealed class TrayService : IDisposable
 
         _auto.StateChanged += OnAutoStateChanged;
 
+        // Подсказка значка хранится в поле готовой строкой, поэтому при смене языка
+        // её нужно пересчитать сразу, а не ждать следующего тика таймера.
+        Loc.Instance.PropertyChanged += OnLanguageChanged;
+
         CreateInitialIcon();
         AddIcon();
         RefreshCore();
@@ -265,7 +271,7 @@ public sealed class TrayService : IDisposable
         _hwnd = CreateWindowExW(
             WS_EX_TOOLWINDOW,
             WindowClassName,
-            "KeySwitch",
+            "KeySwitch DeepSeek",
             0,
             -32000,
             -32000,
@@ -304,6 +310,17 @@ public sealed class TrayService : IDisposable
     private void OnAutoStateChanged(object? sender, EventArgs e)
     {
         // Событие может прийти из потока хука (Ctrl+Alt+P), поэтому всегда через Dispatcher.
+        Post(RefreshCore);
+    }
+
+    /// <summary>
+    /// Сменился язык интерфейса: меню собирается заново при каждом открытии и язык берёт
+    /// из <see cref="Loc"/> само, а подсказка лежит готовой строкой — сбрасываем её,
+    /// чтобы следующий <see cref="RefreshCore"/> пересобрал текст.
+    /// </summary>
+    private void OnLanguageChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        _lastTooltip = string.Empty;
         Post(RefreshCore);
     }
 
@@ -423,28 +440,28 @@ public sealed class TrayService : IDisposable
                 menu,
                 MF_STRING | (autoEnabled ? MF_CHECKED : 0),
                 (UIntPtr)CommandToggleAuto,
-                autoEnabled ? "Автопереключение включено" : "Автопереключение выключено");
+                Loc.T(autoEnabled ? "tray.autoswitch.on" : "tray.autoswitch.off"));
 
             AppendMenuW(menu, MF_SEPARATOR, UIntPtr.Zero, null);
-            AppendMenuW(menu, MF_STRING, (UIntPtr)CommandExceptions, "Исключения…");
-            AppendMenuW(menu, MF_STRING, (UIntPtr)CommandSettings, "Настройки…");
+            AppendMenuW(menu, MF_STRING, (UIntPtr)CommandExceptions, Loc.T("tray.exceptions"));
+            AppendMenuW(menu, MF_STRING, (UIntPtr)CommandSettings, Loc.T("tray.settings"));
             AppendMenuW(menu, MF_SEPARATOR, UIntPtr.Zero, null);
 
             AppendMenuW(
                 menu,
                 MF_STRING | (_settings.StartWithWindows ? MF_CHECKED : 0),
                 (UIntPtr)CommandAutostart,
-                "Запускать при входе в Windows");
+                Loc.T("tray.autostart"));
 
             // Запуск от администратора бессмыслен без автозапуска — приглушаем пункт.
             AppendMenuW(
                 menu,
                 MF_STRING | (_settings.RunAsAdmin ? MF_CHECKED : 0) | (_settings.StartWithWindows ? 0 : MF_GRAYED),
                 (UIntPtr)CommandAdmin,
-                "Запускать от администратора");
+                Loc.T("tray.runasadmin"));
 
             AppendMenuW(menu, MF_SEPARATOR, UIntPtr.Zero, null);
-            AppendMenuW(menu, MF_STRING, (UIntPtr)CommandExit, "Выход");
+            AppendMenuW(menu, MF_STRING, (UIntPtr)CommandExit, Loc.T("tray.exit"));
 
             // Окно трея скрыто и неактивно. Без SetForegroundWindow меню не закроется
             // по клику вне его: первый клик достанется другому окну.
@@ -522,8 +539,8 @@ public sealed class TrayService : IDisposable
         if (!ok && target)
         {
             ShowBalloon(
-                "Автозапуск",
-                "Не удалось включить автозапуск. Попробуйте ещё раз или переустановите приложение.",
+                Loc.T("balloon.autostart.title"),
+                Loc.T("balloon.autostart.failed"),
                 TrayBalloonIcon.Warning);
         }
 
@@ -543,9 +560,8 @@ public sealed class TrayService : IDisposable
         if (!ok && target)
         {
             ShowBalloon(
-                "Запуск от администратора",
-                "Для запуска с правами администратора приложение нужно один раз запустить от имени " +
-                "администратора и включить галочку заново.",
+                Loc.T("balloon.admin.title"),
+                Loc.T("balloon.admin.elevation_required"),
                 TrayBalloonIcon.Warning);
         }
 
@@ -816,34 +832,34 @@ public sealed class TrayService : IDisposable
     {
         string language = DescribeLanguage(layoutId);
         string status = !started
-            ? "безопасный режим"
+            ? Loc.T("tray.status.safe")
             : !enabled
-                ? "автопереключение выключено"
+                ? Loc.T("tray.status.disabled")
                 : manualOnly
-                    ? "ручной режим в этой программе"
-                    : "автопереключение включено";
+                    ? Loc.T("tray.status.manual")
+                    : Loc.T("tray.status.enabled");
 
-        return Truncate($"KeySwitch · {language} · {status}", MaxTipLength);
+        return Truncate(Loc.Format("tray.tooltip", language, status), MaxTipLength);
     }
 
     private static string DescribeLanguage(string layoutId)
     {
         if (string.IsNullOrEmpty(layoutId))
         {
-            return "—";
+            return Loc.T("tray.layout.none");
         }
 
         if (layoutId.StartsWith("ru", StringComparison.OrdinalIgnoreCase))
         {
-            return "RU";
+            return Loc.T("tray.layout.ru");
         }
 
         if (layoutId.StartsWith("en", StringComparison.OrdinalIgnoreCase))
         {
-            return "EN";
+            return Loc.T("tray.layout.en");
         }
 
-        return "??";
+        return Loc.T("tray.layout.none");
     }
 
     private static string Truncate(string text, int maxLength)
@@ -869,9 +885,8 @@ public sealed class TrayService : IDisposable
         }
 
         ShowBalloon(
-            "KeySwitch",
-            "Активное окно запущено с правами администратора. Из-за защиты Windows (UIPI) " +
-            "автопереключение в нём не работает.",
+            Loc.T("app.name"),
+            Loc.T("balloon.uipi.text"),
             TrayBalloonIcon.Warning);
     }
 
@@ -937,6 +952,15 @@ public sealed class TrayService : IDisposable
         try
         {
             _auto.StateChanged -= OnAutoStateChanged;
+        }
+        catch (Exception)
+        {
+            // ignore
+        }
+
+        try
+        {
+            Loc.Instance.PropertyChanged -= OnLanguageChanged;
         }
         catch (Exception)
         {

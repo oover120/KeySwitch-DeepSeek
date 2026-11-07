@@ -9,8 +9,8 @@ namespace KeySwitch.App.Services;
 /// </summary>
 internal sealed class SingleInstance : IDisposable
 {
-    private const string BaseMutexName = @"KeySwitch.SingleInstance.{0}";
-    private const string BaseEventName = @"KeySwitch.Activate.{0}";
+    private const string BaseMutexName = @"KeySwitchDeepSeek.SingleInstance.{0}";
+    private const string BaseEventName = @"KeySwitchDeepSeek.Activate.{0}";
 
     // Global\ даёт единственный экземпляр на всю машину, но создание объекта в глобальном
     // пространстве имён требует SeCreateGlobalPrivilege. У обычного пользователя его нет,

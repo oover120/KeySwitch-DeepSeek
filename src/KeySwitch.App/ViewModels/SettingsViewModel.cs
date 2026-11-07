@@ -6,6 +6,7 @@ using System.Reflection;
 using System.Text;
 using System.Windows.Data;
 using System.Windows.Input;
+using KeySwitch.App.Localization;
 using KeySwitch.App.Services;
 using KeySwitch.Data;
 
@@ -14,14 +15,11 @@ namespace KeySwitch.App.ViewModels;
 /// <summary>
 /// ViewModel окна настроек. Работает с переданными экземплярами Data: настройки
 /// копируются в AppSettings при Apply(), исключения и опечатки сохраняются сразу.
+/// Все видимые пользователю строки берутся из <see cref="Loc"/>; при смене языка
+/// списки вариантов пересоздаются, а сообщения переформатируются без перезапуска окна.
 /// </summary>
 public sealed class SettingsViewModel : ViewModelBase
 {
-    private const string FallbackLicenses =
-        "Встроенные словари и таблицы частот собраны из открытых источников.\n" +
-        "Полные тексты лицензий поставляются в папке Assets/licenses и появляются на этой вкладке " +
-        "после сборки ресурсов.";
-
     private readonly AppSettings _settings;
     private readonly ExceptionStore _exceptions;
     private readonly LearningStore _learning;
@@ -54,7 +52,6 @@ public sealed class SettingsViewModel : ViewModelBase
     private string _selectedTypoLanguage = "ru";
     private string _newTypoWrong = string.Empty;
     private string _newTypoRight = string.Empty;
-    private string? _typoError;
 
     private bool _soundsEnabled;
     private string _switchSoundPath = string.Empty;
@@ -63,18 +60,22 @@ public sealed class SettingsViewModel : ViewModelBase
 
     private string _newProcessName = string.Empty;
     private ExceptionMode _newProcessMode = ExceptionMode.Full;
-    private string? _processError;
     private string _newWord = string.Empty;
     private string _newWordDirection = ExceptionStore.DirectionBoth;
-    private string? _wordError;
 
-    private string? _statusMessage;
-    private string? _validationMessage;
+    // Ошибки ввода храним ключами — при смене языка они переформатируются.
+    private string? _processErrorKey;
+    private string? _wordErrorKey;
+    private string? _typoErrorKey;
+    private string? _statusKey;
+    private object?[] _statusArgs = Array.Empty<object?>();
+    private string? _validationKey;
+    private object?[] _validationArgs = Array.Empty<object?>();
     private bool _hasValidationError;
 
     private string _versionText = "1.0.0";
-    private string _licensesText = FallbackLicenses;
-    private string _learningSummary = string.Empty;
+    private string? _licensesRaw;
+    private int _suppressedWords;
 
     public SettingsViewModel(
         AppSettings settings,
@@ -90,6 +91,12 @@ public sealed class SettingsViewModel : ViewModelBase
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
         _typos = new TypoDictionary(paths, logger);
+
+        Themes = OptionLists.CreateThemes();
+        Languages = OptionLists.CreateLanguages();
+        Directions = OptionLists.CreateDirections();
+        TypoLanguages = OptionLists.CreateTypoLanguages();
+        Modes = OptionLists.CreateModes();
 
         Processes = new ObservableCollection<ProcessRow>();
         Words = new ObservableCollection<WordRow>();
@@ -112,8 +119,12 @@ public sealed class SettingsViewModel : ViewModelBase
         OpenDataFolderCommand = new RelayCommand(OpenDataFolder);
         OpenReadmeCommand = new RelayCommand(OpenReadme);
 
+        _licensesRaw = LoadLicenses();
         VersionText = ReadVersion();
-        LicensesText = LoadLicenses();
+
+        // Окно настройки переиспользует один экземпляр VM, поэтому подписка живёт
+        // столько же, сколько приложение (см. AppHost).
+        Loc.Instance.PropertyChanged += OnLocalizationChanged;
 
         Reload();
     }
@@ -128,6 +139,18 @@ public sealed class SettingsViewModel : ViewModelBase
     public ObservableCollection<TypoRow> TypoEntries { get; }
 
     public ICollectionView TypoView { get; }
+
+    //────────────────────── Списки вариантов (локализуемые) ──────────────────────
+
+    public IReadOnlyList<ChoiceOption> Themes { get; private set; }
+
+    public IReadOnlyList<ChoiceOption> Languages { get; private set; }
+
+    public IReadOnlyList<ChoiceOption> Directions { get; private set; }
+
+    public IReadOnlyList<ChoiceOption> TypoLanguages { get; private set; }
+
+    public IReadOnlyList<ModeOption> Modes { get; private set; }
 
     public ICommand AddProcessCommand { get; }
 
@@ -220,13 +243,13 @@ public sealed class SettingsViewModel : ViewModelBase
     public string ThemeValue
     {
         get => _themeValue;
-        set => SetProperty(ref _themeValue, value);
+        set => SetProperty(ref _themeValue, value ?? _themeValue);
     }
 
     public string LanguageValue
     {
         get => _languageValue;
-        set => SetProperty(ref _languageValue, value);
+        set => SetProperty(ref _languageValue, value ?? _languageValue);
     }
 
     /// <summary>Сочетание клавиш, например "Ctrl+Shift+Space"; пусто — выключено.</summary>
@@ -267,7 +290,7 @@ public sealed class SettingsViewModel : ViewModelBase
         get => _selectedTypoLanguage;
         set
         {
-            if (SetProperty(ref _selectedTypoLanguage, value))
+            if (SetProperty(ref _selectedTypoLanguage, value ?? _selectedTypoLanguage))
             {
                 TypoView.Refresh();
             }
@@ -286,13 +309,9 @@ public sealed class SettingsViewModel : ViewModelBase
         set => SetProperty(ref _newTypoRight, value ?? string.Empty);
     }
 
-    public string? TypoError
-    {
-        get => _typoError;
-        set => SetProperty(ref _typoError, value);
-    }
+    public string? TypoError => _typoErrorKey is null ? null : Loc.T(_typoErrorKey);
 
-    public string TyposFilesText => $"Файлы словаря: {_paths.TyposRuFile} · {_paths.TyposEnFile}";
+    public string TyposFilesText => Loc.Format("typos.files", _paths.TyposRuFile, _paths.TyposEnFile);
 
     //────────────────────────────── Звуки ─────────────────────────────
 
@@ -334,19 +353,9 @@ public sealed class SettingsViewModel : ViewModelBase
         set => SetProperty(ref _newProcessMode, value);
     }
 
-    public string? ProcessError
-    {
-        get => _processError;
-        set
-        {
-            if (SetProperty(ref _processError, value))
-            {
-                OnPropertyChanged(nameof(HasProcessError));
-            }
-        }
-    }
+    public string? ProcessError => _processErrorKey is null ? null : Loc.T(_processErrorKey);
 
-    public bool HasProcessError => !string.IsNullOrEmpty(_processError);
+    public bool HasProcessError => _processErrorKey is not null;
 
     public string NewWord
     {
@@ -360,46 +369,23 @@ public sealed class SettingsViewModel : ViewModelBase
         set => SetProperty(ref _newWordDirection, ExceptionStore.NormalizeDirection(value));
     }
 
-    public string? WordError
-    {
-        get => _wordError;
-        set
-        {
-            if (SetProperty(ref _wordError, value))
-            {
-                OnPropertyChanged(nameof(HasWordError));
-            }
-        }
-    }
+    public string? WordError => _wordErrorKey is null ? null : Loc.T(_wordErrorKey);
 
-    public bool HasWordError => !string.IsNullOrEmpty(_wordError);
+    public bool HasWordError => _wordErrorKey is not null;
 
     //───────────────────────────── Состояние ───────────────────────────
 
-    public string? StatusMessage
-    {
-        get => _statusMessage;
-        set
-        {
-            if (SetProperty(ref _statusMessage, value))
-            {
-                OnPropertyChanged(nameof(HasStatusMessage));
-            }
-        }
-    }
+    public string? StatusMessage => _statusKey is null ? null : Loc.Format(_statusKey, _statusArgs);
 
-    public bool HasStatusMessage => !string.IsNullOrEmpty(_statusMessage);
+    public bool HasStatusMessage => _statusKey is not null;
 
-    public string? ValidationMessage
-    {
-        get => _validationMessage;
-        set => SetProperty(ref _validationMessage, value);
-    }
+    public string? ValidationMessage =>
+        _validationKey is null ? null : Loc.Format(_validationKey, _validationArgs);
 
     public bool HasValidationError
     {
         get => _hasValidationError;
-        set => SetProperty(ref _hasValidationError, value);
+        private set => SetProperty(ref _hasValidationError, value);
     }
 
     public string VersionText
@@ -408,17 +394,14 @@ public sealed class SettingsViewModel : ViewModelBase
         private set => SetProperty(ref _versionText, value);
     }
 
-    public string LicensesText
-    {
-        get => _licensesText;
-        private set => SetProperty(ref _licensesText, value);
-    }
+    /// <summary>Строка «Версия …» для вкладки «О программе» (зависит от языка).</summary>
+    public string AboutVersionText => Loc.Format("about.version", VersionText);
 
-    public string LearningSummary
-    {
-        get => _learningSummary;
-        private set => SetProperty(ref _learningSummary, value);
-    }
+    /// <summary>Тексты лицензий из embedded-ресурсов либо локализованная заглушка.</summary>
+    public string LicensesText => _licensesRaw ?? Loc.T("about.licensesFallback");
+
+    public string LearningSummary =>
+        Loc.Format("about.learningSummary", _learning.TotalUndos, _learning.TotalAccepted, _suppressedWords);
 
     public string DataFolderPath => _paths.Root;
 
@@ -437,8 +420,8 @@ public sealed class SettingsViewModel : ViewModelBase
         StartWithWindows = _settings.StartWithWindows;
         RunAsAdmin = _settings.RunAsAdmin;
         SafeMode = _settings.SafeMode;
-        ThemeValue = NormalizeChoice(_settings.Theme, OptionLists.Themes, "system");
-        LanguageValue = NormalizeChoice(_settings.Language, OptionLists.Languages, "ru");
+        ThemeValue = NormalizeChoice(_settings.Theme, Themes, "system");
+        LanguageValue = NormalizeChoice(_settings.Language, Languages, "ru");
         ManualConvertHotkey = _settings.ManualConvertHotkey ?? string.Empty;
         PauseHotkeyEnabled = _settings.PauseHotkeyEnabled;
 
@@ -472,19 +455,17 @@ public sealed class SettingsViewModel : ViewModelBase
         NewWordDirection = ExceptionStore.DirectionBoth;
         NewTypoWrong = string.Empty;
         NewTypoRight = string.Empty;
-        ProcessError = null;
-        WordError = null;
-        TypoError = null;
-        ValidationMessage = null;
-        HasValidationError = false;
-        StatusMessage = null;
+        ClearProcessError();
+        ClearWordError();
+        ClearTypoError();
+        ClearValidation();
+        ClearStatus();
     }
 
     /// <summary>Проверить и сохранить настройки. Возвращает false, если есть ошибки валидации.</summary>
     public bool Apply()
     {
-        ValidationMessage = null;
-        HasValidationError = false;
+        ClearValidation();
 
         if (!Validate())
         {
@@ -492,6 +473,9 @@ public sealed class SettingsViewModel : ViewModelBase
         }
 
         CopyToSettings();
+
+        // Язык применяем сразу: привязки к Loc.Instance перечитываются сами.
+        Loc.Instance.SetLanguage(_settings.Language);
 
         try
         {
@@ -501,20 +485,18 @@ public sealed class SettingsViewModel : ViewModelBase
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             _logger.Error("Не удалось сохранить исключения или словарь опечаток.", ex);
-            ValidationMessage = "Не удалось записать файлы данных: " + ex.Message;
-            HasValidationError = true;
+            SetValidation("error.saveData", ex.Message);
             return false;
         }
 
         if (!string.IsNullOrEmpty(_typos.LastError))
         {
-            ValidationMessage = "Не удалось сохранить словарь опечаток: " + _typos.LastError;
-            HasValidationError = true;
+            SetValidation("error.typosSave", _typos.LastError);
             return false;
         }
 
         _logger.Info("Настройки сохранены из окна настроек.");
-        StatusMessage = "Настройки сохранены.";
+        SetStatus("status.saved");
         Saved?.Invoke(this, EventArgs.Empty);
         return true;
     }
@@ -523,22 +505,19 @@ public sealed class SettingsViewModel : ViewModelBase
     {
         if (EarlySwitchMinLength < 2 || EarlySwitchMinLength > 20)
         {
-            ValidationMessage = "Минимальная длина для раннего срабатывания — от 2 до 20 символов.";
-            HasValidationError = true;
+            SetValidation("error.earlyLength");
             return false;
         }
 
         if (ConfidenceThreshold < 0.5 || ConfidenceThreshold > 5.0)
         {
-            ValidationMessage = "Порог уверенности должен быть в диапазоне 0.5–5.0.";
-            HasValidationError = true;
+            SetValidation("error.confidence");
             return false;
         }
 
         if (!string.IsNullOrWhiteSpace(ManualConvertHotkey) && !IsValidHotkey(ManualConvertHotkey))
         {
-            ValidationMessage = "Сочетание клавиш должно заканчиваться клавишей, например Ctrl+Shift+Space.";
-            HasValidationError = true;
+            SetValidation("error.hotkey");
             return false;
         }
 
@@ -547,9 +526,8 @@ public sealed class SettingsViewModel : ViewModelBase
             string right = (row.Right ?? string.Empty).Trim();
             if (right.Length == 0 || right.Contains('='))
             {
-                ValidationMessage = $"Проверьте замену для «{row.Wrong}»: она не должна быть пустой и не должна содержать «=».";
-                HasValidationError = true;
                 SelectedTypoLanguage = row.Language;
+                SetValidation("error.typoReplacement", row.Wrong ?? string.Empty);
                 return false;
             }
         }
@@ -588,8 +566,8 @@ public sealed class SettingsViewModel : ViewModelBase
         _settings.StartWithWindows = StartWithWindows;
         _settings.RunAsAdmin = RunAsAdmin;
         _settings.SafeMode = SafeMode;
-        _settings.Theme = NormalizeChoice(ThemeValue, OptionLists.Themes, "system");
-        _settings.Language = NormalizeChoice(LanguageValue, OptionLists.Languages, "ru");
+        _settings.Theme = NormalizeChoice(ThemeValue, Themes, "system");
+        _settings.Language = NormalizeChoice(LanguageValue, Languages, "system");
         _settings.ManualConvertHotkey = ManualConvertHotkey.Trim();
         _settings.PauseHotkeyEnabled = PauseHotkeyEnabled;
 
@@ -656,18 +634,18 @@ public sealed class SettingsViewModel : ViewModelBase
 
     private void AddProcess()
     {
-        ProcessError = null;
+        ClearProcessError();
         string name = NormalizeProcessInput(NewProcessName);
 
         if (name.Length == 0)
         {
-            ProcessError = "Укажите имя процесса, например Code.exe.";
+            SetProcessError("error.processEmpty");
             return;
         }
 
         if (Processes.Any(row => row.Name.Equals(name, StringComparison.OrdinalIgnoreCase)))
         {
-            ProcessError = "Такой процесс уже есть в списке.";
+            SetProcessError("error.processDuplicate");
             return;
         }
 
@@ -709,14 +687,14 @@ public sealed class SettingsViewModel : ViewModelBase
     {
         var dialog = new Microsoft.Win32.OpenFileDialog
         {
-            Title = "Выберите программу",
-            Filter = "Программы (*.exe)|*.exe|Все файлы (*.*)|*.*",
+            Title = Loc.T("dialog.chooseApp"),
+            Filter = Loc.T("filter.programs"),
         };
 
         if (dialog.ShowDialog() == true)
         {
             NewProcessName = Path.GetFileName(dialog.FileName);
-            ProcessError = null;
+            ClearProcessError();
         }
     }
 
@@ -732,12 +710,12 @@ public sealed class SettingsViewModel : ViewModelBase
 
     private void AddWord()
     {
-        WordError = null;
+        ClearWordError();
         string word = NewWord.Trim();
 
         if (!_exceptions.CanAddWordException(word, out string error))
         {
-            WordError = string.IsNullOrEmpty(error) ? "Это слово нельзя добавить в исключения." : error;
+            SetWordError(MapWordError(error));
             return;
         }
 
@@ -747,19 +725,36 @@ public sealed class SettingsViewModel : ViewModelBase
         if (Words.Any(row => row.Word.Equals(normalized, StringComparison.OrdinalIgnoreCase)
                              && row.Direction == direction))
         {
-            WordError = "Такое слово уже есть в этом направлении.";
+            SetWordError("error.wordDuplicateDirection");
             return;
         }
 
         if (direction == ExceptionStore.DirectionBoth
             && Words.Any(row => row.Word.Equals(normalized, StringComparison.OrdinalIgnoreCase)))
         {
-            WordError = "Это слово уже исключено в одном из направлений — уберите старую запись.";
+            SetWordError("error.wordConflict");
             return;
         }
 
         Words.Add(new WordRow(normalized, direction));
         NewWord = string.Empty;
+    }
+
+    /// <summary>Переводит русские тексты ExceptionStore на ключи локализации.</summary>
+    private static string MapWordError(string? error)
+    {
+        return error switch
+        {
+            null or "" => "error.wordGeneric",
+            "Слово не задано." => "error.wordEmpty",
+            "Числа и слова с цифрами не добавляются в исключения." => "error.wordDigits",
+            "Слово должно состоять только из букв." => "error.wordLetters",
+            "Поддерживаются только русские и английские буквы." => "error.wordAlphabet",
+            "Слишком короткое слово: нужно минимум 2 буквы." => "error.wordTooShort",
+            "Слово не должно смешивать русские и английские буквы." => "error.wordMixed",
+            "Это слово входит в топ-100 частотных — его нельзя исключать." => "error.wordFrequent",
+            _ => "error.wordGeneric",
+        };
     }
 
     private void RemoveWord(WordRow? row)
@@ -808,25 +803,25 @@ public sealed class SettingsViewModel : ViewModelBase
 
     private void AddTypo()
     {
-        TypoError = null;
+        ClearTypoError();
         string wrong = NewTypoWrong.Trim().ToLowerInvariant();
         string right = NewTypoRight.Trim();
 
         if (wrong.Length == 0 || right.Length == 0)
         {
-            TypoError = "Заполните оба поля: что искать и на что заменять.";
+            SetTypoError("error.typoBothFields");
             return;
         }
 
         if (wrong.Contains('=') || right.Contains('='))
         {
-            TypoError = "Символ «=» разделяет пары в файле словаря — его использовать нельзя.";
+            SetTypoError("error.typoEquals");
             return;
         }
 
         if (wrong == right)
         {
-            TypoError = "Замена совпадает с исходным словом.";
+            SetTypoError("error.typoSame");
             return;
         }
 
@@ -867,8 +862,8 @@ public sealed class SettingsViewModel : ViewModelBase
     {
         var dialog = new Microsoft.Win32.OpenFileDialog
         {
-            Title = isSwitch ? "Звук переключения раскладки" : "Звук исправления",
-            Filter = "Звуковые файлы (*.wav)|*.wav|Все файлы (*.*)|*.*",
+            Title = Loc.T(isSwitch ? "dialog.switchSound" : "dialog.fixSound"),
+            Filter = Loc.T("filter.sounds"),
         };
 
         if (dialog.ShowDialog() == true)
@@ -882,7 +877,7 @@ public sealed class SettingsViewModel : ViewModelBase
                 FixSoundPath = dialog.FileName;
             }
 
-            StatusMessage = "Путь к звуку выбран. Сохраните настройки.";
+            SetStatus("status.soundPathChosen");
         }
     }
 
@@ -890,26 +885,26 @@ public sealed class SettingsViewModel : ViewModelBase
     {
         if (string.IsNullOrWhiteSpace(path))
         {
-            StatusMessage = "Сначала выберите wav-файл.";
+            SetStatus("status.chooseSoundFirst");
             return;
         }
 
         if (!File.Exists(path))
         {
-            StatusMessage = "Файл не найден: " + path;
+            SetStatus("status.soundNotFound", path);
             return;
         }
 
         SoundService? sounds = SoundService.Shared;
         if (sounds is null)
         {
-            StatusMessage = "Прослушивание доступно из запущенного KeySwitch (звук будет применён после сохранения).";
+            SetStatus("status.previewUnavailable");
             return;
         }
 
         sounds.SetVolume(SoundVolume);
         sounds.Preview(path);
-        StatusMessage = "Воспроизведение…";
+        SetStatus("status.playing");
     }
 
     //─────────────────────────── О программе ───────────────────────────
@@ -928,7 +923,7 @@ public sealed class SettingsViewModel : ViewModelBase
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
         {
             _logger.Warn("Не удалось открыть папку данных: " + ex.Message);
-            StatusMessage = "Не удалось открыть папку данных: " + ex.Message;
+            SetStatus("status.dataFolderFailed", ex.Message);
         }
     }
 
@@ -937,7 +932,7 @@ public sealed class SettingsViewModel : ViewModelBase
         string? readme = FindReadme();
         if (readme is null)
         {
-            StatusMessage = "README.md не найден рядом с приложением.";
+            SetStatus("status.readmeMissing");
             return;
         }
 
@@ -947,7 +942,7 @@ public sealed class SettingsViewModel : ViewModelBase
         }
         catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
         {
-            StatusMessage = "Не удалось открыть README: " + ex.Message;
+            SetStatus("status.readmeFailed", ex.Message);
         }
     }
 
@@ -984,7 +979,7 @@ public sealed class SettingsViewModel : ViewModelBase
     }
 
     /// <summary>Лицензии словарей: embedded-ресурсы KeySwitch.Data (Assets/licenses/*).</summary>
-    private static string LoadLicenses()
+    private static string? LoadLicenses()
     {
         try
         {
@@ -1020,20 +1015,18 @@ public sealed class SettingsViewModel : ViewModelBase
                 builder.Append(text);
             }
 
-            return builder.Length == 0 ? FallbackLicenses : builder.ToString().TrimEnd();
+            return builder.Length == 0 ? null : builder.ToString().TrimEnd();
         }
         catch (Exception)
         {
-            return FallbackLicenses;
+            return null;
         }
     }
 
     private void RefreshLearningSummary()
     {
-        int suppressed = _learning.Snapshot().Values.Count(stats => stats.Suppressed);
-        LearningSummary =
-            $"Отмен: {_learning.TotalUndos} · принято исправлений: {_learning.TotalAccepted} · " +
-            $"слов с подавлением: {suppressed}";
+        _suppressedWords = _learning.Snapshot().Values.Count(stats => stats.Suppressed);
+        OnPropertyChanged(nameof(LearningSummary));
     }
 
     private static string NormalizeChoice(string? value, IReadOnlyList<ChoiceOption> options, string fallback)
@@ -1052,5 +1045,112 @@ public sealed class SettingsViewModel : ViewModelBase
         }
 
         return fallback;
+    }
+
+    //────────────────────────── Локализация ────────────────────────────
+
+    /// <summary>
+    /// Смена языка: Loc поднимает PropertyChanged с пустым именем. Обновляем
+    /// подписи вариантов на месте (списки не пересоздаём, иначе ComboBox теряет
+    /// выбранный пункт) и переформатируем тексты.
+    /// </summary>
+    private void OnLocalizationChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (!string.IsNullOrEmpty(e.PropertyName))
+        {
+            return;
+        }
+
+        OptionLists.RefreshTitles(Themes);
+        OptionLists.RefreshTitles(Languages);
+        OptionLists.RefreshTitles(Directions);
+        OptionLists.RefreshTitles(TypoLanguages);
+        OptionLists.RefreshTitles(Modes);
+
+        OnPropertyChanged(nameof(TyposFilesText));
+        OnPropertyChanged(nameof(LearningSummary));
+        OnPropertyChanged(nameof(AboutVersionText));
+        OnPropertyChanged(nameof(LicensesText));
+        OnPropertyChanged(nameof(StatusMessage));
+        OnPropertyChanged(nameof(ValidationMessage));
+        OnPropertyChanged(nameof(ProcessError));
+        OnPropertyChanged(nameof(WordError));
+        OnPropertyChanged(nameof(TypoError));
+        OnPropertyChanged(nameof(HasProcessError));
+        OnPropertyChanged(nameof(HasWordError));
+    }
+
+    //────────────────────── Состояние и ошибки: ключи ──────────────────
+
+    private void SetStatus(string key, params object?[] args)
+    {
+        _statusKey = key;
+        _statusArgs = args;
+        OnPropertyChanged(nameof(StatusMessage));
+        OnPropertyChanged(nameof(HasStatusMessage));
+    }
+
+    private void ClearStatus()
+    {
+        _statusKey = null;
+        _statusArgs = Array.Empty<object?>();
+        OnPropertyChanged(nameof(StatusMessage));
+        OnPropertyChanged(nameof(HasStatusMessage));
+    }
+
+    private void SetValidation(string key, params object?[] args)
+    {
+        _validationKey = key;
+        _validationArgs = args;
+        HasValidationError = true;
+        OnPropertyChanged(nameof(ValidationMessage));
+    }
+
+    private void ClearValidation()
+    {
+        _validationKey = null;
+        _validationArgs = Array.Empty<object?>();
+        HasValidationError = false;
+        OnPropertyChanged(nameof(ValidationMessage));
+    }
+
+    private void SetProcessError(string key)
+    {
+        _processErrorKey = key;
+        OnPropertyChanged(nameof(ProcessError));
+        OnPropertyChanged(nameof(HasProcessError));
+    }
+
+    private void ClearProcessError()
+    {
+        _processErrorKey = null;
+        OnPropertyChanged(nameof(ProcessError));
+        OnPropertyChanged(nameof(HasProcessError));
+    }
+
+    private void SetWordError(string key)
+    {
+        _wordErrorKey = key;
+        OnPropertyChanged(nameof(WordError));
+        OnPropertyChanged(nameof(HasWordError));
+    }
+
+    private void ClearWordError()
+    {
+        _wordErrorKey = null;
+        OnPropertyChanged(nameof(WordError));
+        OnPropertyChanged(nameof(HasWordError));
+    }
+
+    private void SetTypoError(string key)
+    {
+        _typoErrorKey = key;
+        OnPropertyChanged(nameof(TypoError));
+    }
+
+    private void ClearTypoError()
+    {
+        _typoErrorKey = null;
+        OnPropertyChanged(nameof(TypoError));
     }
 }

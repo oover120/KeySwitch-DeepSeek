@@ -330,3 +330,30 @@ backspaces=7 target=ru-RU layout_before=en-US pause=12мс conf=1,00` →
 из игры. Тесты запускаются одной командой, как только игра закрыта:
 `powershell -NoProfile -ExecutionPolicy Bypass -File tools\probe\run-ks.ps1 -Target notepad`
 и `-Target chrome`.
+
+## Этап 14. KeySwitch DeepSeek: переименование и английский интерфейс (07.11.2026)
+
+**Переименование.** Продукт называется «KeySwitch DeepSeek» (решение D031). Изменились
+`AssemblyName` → `KeySwitchDeepSeek`, `Product`/`AssemblyTitle`, `app.manifest`
+(`KeySwitchDeepSeek.app`, версия 1.1.0), папка данных `%APPDATA%\KeySwitchDeepSeek`,
+установщик `installer\KeySwitchDeepSeek.iss` (per-user в `%LOCALAPPDATA%\Programs\KeySwitchDeepSeek`,
+новый `AppId`), значение автозапуска и имя задачи планировщика `KeySwitchDeepSeek`,
+мьютекс и событие активации `KeySwitchDeepSeek.*`, `publish.ps1`, стенд `tools\probe\run-ks.ps1`.
+Пространства имён и имена проектов остались `KeySwitch.*` — это структура решения, а не бренд.
+
+**Локализация.** `src\KeySwitch.App\Localization\Loc.cs`: `UiLanguage { System, Russian, English }`,
+индексатор `Loc.Instance[key]`, `T`/`Format`, `INotifyPropertyChanged` с пустым именем при смене языка.
+`Strings.Ui.cs` — 152 ключа × 2 языка, `Strings.Runtime.cs` — 23 ключа трея, баллунов и запуска.
+Меню трея собирается заново при каждом открытии, подсказка пересобирается по `PropertyChanged`.
+Окно настроек: XAML привязан через `{Binding [key], Source={x:Static loc:Loc.Instance}}`,
+сообщения ViewModel хранят ключ и аргументы и переформатируются на лету; списки вариантов
+обновляют подписи на месте — пересоздание сбрасывало выбор `ComboBox` и давало `null` в
+non-nullable `ExceptionMode`. Язык применяется сохранением настроек, без перезапуска.
+По умолчанию — язык Windows (`"system"`), с ru для ru/uk/be/kk/ky.
+
+**Проверка.** `dotnet build KeySwitch.sln -c Release` — 0 ошибок / 0 предупреждений;
+`dotnet test` — **376/376**; `publish.ps1 -SkipTests` → `artifacts\publish\KeySwitchDeepSeek.exe`.
+Харнесс `%TEMP%\ksui` отрисовал 5 вкладок в RU и EN, светлую и тёмную темы, 860×640 и 760×560;
+скриншоты `docs\img\settings-en.png` и `docs\img\about-en-dark.png`.
+
+**Не сделано.** Установщик не скомпилирован — Inno Setup на машине нет.

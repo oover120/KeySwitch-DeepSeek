@@ -1,11 +1,12 @@
 using System.Windows;
 using System.Windows.Threading;
 using KeySwitch.App.Services;
+using KeySwitch.App.Localization;
 using KeySwitch.App.Themes;
 using KeySwitch.Data;
 
-// UseWindowsForms приносит глобальные using System.Windows.Forms, поэтому Application
-// и MessageBox приходится уточнять явно.
+// Псевдонимы: Application и MessageBox встречаются в нескольких пространствах имён .NET,
+// а приложению нужны именно WPF-варианты.
 using Application = System.Windows.Application;
 using MessageBox = System.Windows.MessageBox;
 
@@ -47,9 +48,11 @@ public partial class App : Application
         }
         catch (Exception ex)
         {
+            // Язык из настроек ещё не применён (настройки не загрузились) — Loc отдаст
+            // русский текст по умолчанию, это и есть безопасный fallback.
             MessageBox.Show(
-                "Не удалось подготовить папку данных приложения:\n" + ex.Message,
-                "KeySwitch",
+                Loc.Format("startup.data_folder.failed", ex.Message),
+                Loc.T("app.name"),
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
             Shutdown();
@@ -62,10 +65,13 @@ public partial class App : Application
         {
             _host = new AppHost(paths, _logger);
 
+            // Язык и тему применяем до первых окон и до значка в трее.
+            Loc.Instance.SetLanguage(_host.Settings.Language);
+
             // Тему применяем до первых окон. App.xaml намеренно пустой — словари кладёт ThemeManager.
             ThemeManager.EnsureInitialized(_host.Settings.Theme);
 
-            _logger.Info($"KeySwitch запущен (v{typeof(App).Assembly.GetName().Version}).");
+            _logger.Info($"KeySwitch DeepSeek запущен (v{typeof(App).Assembly.GetName().Version}).");
             // Путь к исполняемому файлу — единственный надёжный способ понять, какая именно
             // сборка сейчас работает: на машине могут одновременно лежать несколько копий,
             // и все они пишут в один и тот же журнал.
@@ -80,9 +86,8 @@ public partial class App : Application
             _startupFailed = true;
             _logger.Error("Критическая ошибка при запуске", ex);
             MessageBox.Show(
-                "KeySwitch не смог запуститься.\nПодробности записаны в журнал:\n" +
-                @"%APPDATA%\KeySwitch\logs\keyswitch.log",
-                "KeySwitch",
+                Loc.Format("startup.failed", @"%APPDATA%\KeySwitch\logs\keyswitch.log"),
+                Loc.T("app.name"),
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
             Shutdown();

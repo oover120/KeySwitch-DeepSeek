@@ -72,8 +72,8 @@ public sealed class AppSettings
     /// <summary>"system" | "light" | "dark".</summary>
     public string Theme { get; set; } = "system";
 
-    /// <summary>"ru" | "en" | "system".</summary>
-    public string Language { get; set; } = "ru";
+    /// <summary>"ru" | "en" | "system" — язык интерфейса.</summary>
+    public string Language { get; set; } = "system";
 
     // ── Обучение ────────────────────────────────────────────────────────────
     public bool LearningEnabled { get; set; } = true;
@@ -107,6 +107,6 @@ public sealed class AppSettings
             ManualConvertHotkey = string.Empty;
 
         Theme = string.IsNullOrWhiteSpace(Theme) ? "system" : Theme.Trim().ToLowerInvariant();
-        Language = string.IsNullOrWhiteSpace(Language) ? "ru" : Language.Trim().ToLowerInvariant();
+        Language = string.IsNullOrWhiteSpace(Language) ? "system" : Language.Trim().ToLowerInvariant();
     }
 }

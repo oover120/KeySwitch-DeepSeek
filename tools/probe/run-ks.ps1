@@ -83,9 +83,9 @@ public static class W {
 
 $root = Join-Path $env:TEMP 'ksprobe'
 New-Item -ItemType Directory -Force -Path $root | Out-Null
-$appData = Join-Path $env:APPDATA 'KeySwitch'
+$appData = Join-Path $env:APPDATA 'KeySwitchDeepSeek'
 $logPath = Join-Path $appData 'logs\keyswitch.log'
-$exe = Join-Path $repo 'src\KeySwitch.App\bin\Release\net8.0-windows\win-x64\KeySwitch.exe'
+$exe = Join-Path $repo 'src\KeySwitch.App\bin\Release\net8.0-windows\win-x64\KeySwitchDeepSeek.exe'
 
 $consoleHwnd = (Get-Process -Id $PID).MainWindowHandle
 if ($consoleHwnd -ne 0) { [void][W]::ShowWindow($consoleHwnd, 6) }
@@ -100,7 +100,7 @@ function Stop-ProbeChrome {
 }
 
 function Stop-KeySwitch {
-    Get-Process KeySwitch -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    Get-Process KeySwitchDeepSeek -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
     Start-Sleep -Milliseconds 300
 }
 
