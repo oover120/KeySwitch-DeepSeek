@@ -1,0 +1,110 @@
+<UserControl x:Class="KeySwitch.App.Views.Tabs.SoundsTab"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="clr-namespace:KeySwitch.App.Views.Controls"
+             FontFamily="{DynamicResource AppFontFamily}"
+             FontSize="14"
+             Foreground="{DynamicResource TextPrimaryBrush}">
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                  HorizontalScrollBarVisibility="Disabled"
+                  Focusable="False">
+        <StackPanel MaxWidth="760"
+                    Margin="26,18,26,24"
+                    HorizontalAlignment="Center">
+
+            <TextBlock Text="Звуковое оповещение" Style="{DynamicResource SectionTitleStyle}" Margin="2,0,0,10" />
+
+            <Border Style="{DynamicResource CardStyle}" Margin="0,0,0,18">
+                <StackPanel>
+                    <controls:SettingRow Header="Включить звуки"
+                                         Description="Короткий сигнал, когда раскладка переключена или исправлена опечатка.">
+                        <ToggleButton Style="{DynamicResource ToggleSwitchStyle}"
+                                      IsChecked="{Binding SoundsEnabled, Mode=TwoWay}" />
+                    </controls:SettingRow>
+
+                    <Border Style="{DynamicResource DividerStyle}" />
+
+                    <controls:SettingRow Header="Звук переключения раскладки"
+                                         Description="WAV-файл, который играет при смене языка."
+                                         IsEnabled="{Binding SoundsEnabled}">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBox Width="250"
+                                     Text="{Binding SwitchSoundPath, UpdateSourceTrigger=PropertyChanged}"
+                                     ToolTip="{Binding SwitchSoundPath}" />
+                            <Button Content="Выбрать…"
+                                    Margin="8,0,0,0"
+                                    Command="{Binding BrowseSwitchSoundCommand}" />
+                            <Button Width="34"
+                                    Padding="0"
+                                    Margin="8,0,0,0"
+                                    Command="{Binding PlaySwitchSoundCommand}"
+                                    ToolTip="Прослушать">
+                                <Path Data="M 0,0 L 7,5 L 0,10 Z"
+                                      Fill="{DynamicResource TextPrimaryBrush}"
+                                      Width="7"
+                                      Height="10"
+                                      Stretch="None"
+                                      HorizontalAlignment="Center"
+                                      VerticalAlignment="Center" />
+                            </Button>
+                        </StackPanel>
+                    </controls:SettingRow>
+
+                    <Border Style="{DynamicResource DividerStyle}" />
+
+                    <controls:SettingRow Header="Звук исправления"
+                                         Description="WAV-файл для случаев, когда исправлена опечатка или регистр."
+                                         IsEnabled="{Binding SoundsEnabled}">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBox Width="250"
+                                     Text="{Binding FixSoundPath, UpdateSourceTrigger=PropertyChanged}"
+                                     ToolTip="{Binding FixSoundPath}" />
+                            <Button Content="Выбрать…"
+                                    Margin="8,0,0,0"
+                                    Command="{Binding BrowseFixSoundCommand}" />
+                            <Button Width="34"
+                                    Padding="0"
+                                    Margin="8,0,0,0"
+                                    Command="{Binding PlayFixSoundCommand}"
+                                    ToolTip="Прослушать">
+                                <Path Data="M 0,0 L 7,5 L 0,10 Z"
+                                      Fill="{DynamicResource TextPrimaryBrush}"
+                                      Width="7"
+                                      Height="10"
+                                      Stretch="None"
+                                      HorizontalAlignment="Center"
+                                      VerticalAlignment="Center" />
+                            </Button>
+                        </StackPanel>
+                    </controls:SettingRow>
+
+                    <Border Style="{DynamicResource DividerStyle}" />
+
+                    <controls:SettingRow Header="Громкость"
+                                         Description="Общая громкость звуков KeySwitch, не затрагивает системную."
+                                         IsEnabled="{Binding SoundsEnabled}">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <Slider Width="220"
+                                    Minimum="0"
+                                    Maximum="1"
+                                    SmallChange="0.05"
+                                    LargeChange="0.1"
+                                    Value="{Binding SoundVolume, Mode=TwoWay}"
+                                    VerticalAlignment="Center" />
+                            <TextBlock Width="52"
+                                       Margin="10,0,0,0"
+                                       TextAlignment="Right"
+                                       VerticalAlignment="Center"
+                                       Foreground="{DynamicResource TextSecondaryBrush}"
+                                       Text="{Binding SoundVolume, Converter={StaticResource Percent}}" />
+                        </StackPanel>
+                    </controls:SettingRow>
+                </StackPanel>
+            </Border>
+
+            <TextBlock Style="{DynamicResource HintTextStyle}"
+                       Text="Поддерживаются файлы WAV. Если файл не выбран, звук переключения не играет. Кнопка «Прослушать» работает из запущенного KeySwitch; выбранный путь сохранится и после перезапуска." />
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

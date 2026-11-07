@@ -1,0 +1,12 @@
+bin/
+obj/
+.vs/
+*.user
+*.suo
+artifacts/
+publish/
+TestResults/
+*.log
+tools/BuildAssets/downloads/
+tools/BuildAssets/cache/
+*.tmp

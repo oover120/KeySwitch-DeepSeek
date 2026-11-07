@@ -1,0 +1,146 @@
+<UserControl x:Class="KeySwitch.App.Views.Tabs.TyposTab"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="clr-namespace:KeySwitch.App.Views.Controls"
+             xmlns:vm="clr-namespace:KeySwitch.App.ViewModels"
+             FontFamily="{DynamicResource AppFontFamily}"
+             FontSize="14"
+             Foreground="{DynamicResource TextPrimaryBrush}">
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                  HorizontalScrollBarVisibility="Disabled"
+                  Focusable="False">
+        <StackPanel MaxWidth="760"
+                    Margin="26,18,26,24"
+                    HorizontalAlignment="Center">
+
+            <TextBlock Text="Исправление" Style="{DynamicResource SectionTitleStyle}" Margin="2,0,0,10" />
+
+            <Border Style="{DynamicResource CardStyle}" Margin="0,0,0,18">
+                <StackPanel>
+                    <controls:SettingRow
+                                         Header="Исправлять опечатки"
+                                         Description="Подменять частые опечатки по словарю: «привет» с лишней буквой, «сейчас», «только» и т. п.">
+                        <ToggleButton Style="{DynamicResource ToggleSwitchStyle}"
+                                      IsChecked="{Binding TyposEnabled, Mode=TwoWay}" />
+                    </controls:SettingRow>
+
+                    <Border Style="{DynamicResource DividerStyle}" />
+
+                    <controls:SettingRow
+                                         Header="Исправлять регистр"
+                                         Description="ИСправление → Исправление, ПРивет → Привет: если слово набрано с зажатым Caps Lock.">
+                        <ToggleButton Style="{DynamicResource ToggleSwitchStyle}"
+                                      IsChecked="{Binding CapsFixEnabled, Mode=TwoWay}"
+                                      IsEnabled="{Binding TyposEnabled}" />
+                    </controls:SettingRow>
+
+                    <Border Style="{DynamicResource DividerStyle}" />
+
+                    <controls:SettingRow
+                                         Header="Ёфикатор"
+                                         Description="Расставлять «ё» в словах, где она пишется: ещё, её, зовём.">
+                        <ToggleButton Style="{DynamicResource ToggleSwitchStyle}"
+                                      IsChecked="{Binding YoFixEnabled, Mode=TwoWay}"
+                                      IsEnabled="{Binding TyposEnabled}" />
+                    </controls:SettingRow>
+                </StackPanel>
+            </Border>
+
+            <Grid Margin="2,0,0,10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="Словарь замен" Style="{DynamicResource SectionTitleStyle}" />
+                <ComboBox Grid.Column="1"
+                          Width="180"
+                          ItemsSource="{x:Static vm:OptionLists.TypoLanguages}"
+                          DisplayMemberPath="Title"
+                          SelectedValuePath="Value"
+                          SelectedValue="{Binding SelectedTypoLanguage, Mode=TwoWay}" />
+            </Grid>
+
+            <Border Style="{DynamicResource CardStyle}">
+                <StackPanel>
+                    <TextBlock Style="{DynamicResource HintTextStyle}"
+                               Margin="0,0,0,10"
+                               Text="Замены применяются к целым словам. Неверное слово записывается строчными буквами, верное — как нужно в тексте." />
+
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="26" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <TextBox Grid.Column="0"
+                                 Text="{Binding NewTypoWrong, UpdateSourceTrigger=PropertyChanged}"
+                                 ToolTip="Как встречается: првиет" />
+                        <TextBlock Grid.Column="1"
+                                   Text="→"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"
+                                   Foreground="{DynamicResource TextSecondaryBrush}" />
+                        <TextBox Grid.Column="2"
+                                 Text="{Binding NewTypoRight, UpdateSourceTrigger=PropertyChanged}"
+                                 ToolTip="Как должно быть: привет" />
+                        <Button Grid.Column="3"
+                                Content="Добавить"
+                                Margin="8,0,0,0"
+                                Command="{Binding AddTypoCommand}" />
+                    </Grid>
+
+                    <TextBlock Text="{Binding TypoError}"
+                               Style="{DynamicResource DangerTextStyle}"
+                               Margin="0,8,0,0"
+                               Visibility="{Binding TypoError, Converter={StaticResource EmptyStringToVisibility}}" />
+
+                    <Border Style="{DynamicResource DividerStyle}" Margin="0,12,0,6" />
+
+                    <ListBox ItemsSource="{Binding TypoView}"
+                             MaxHeight="250"
+                             ScrollViewer.VerticalScrollBarVisibility="Auto"
+                             BorderThickness="0"
+                             Background="Transparent">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Margin="0,3">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="26" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+
+                                    <TextBlock Grid.Column="0"
+                                               Text="{Binding Wrong}"
+                                               VerticalAlignment="Center"
+                                               TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Grid.Column="1"
+                                               Text="→"
+                                               HorizontalAlignment="Center"
+                                               VerticalAlignment="Center"
+                                               Foreground="{DynamicResource TextSecondaryBrush}" />
+                                    <TextBox Grid.Column="2"
+                                             Text="{Binding Right, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                    <Button Grid.Column="3"
+                                            Content="Удалить"
+                                            Margin="10,0,0,0"
+                                            Style="{DynamicResource LinkButtonStyle}"
+                                            Command="{Binding DataContext.RemoveTypoCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                            CommandParameter="{Binding}" />
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+
+                    <TextBlock Text="{Binding TyposFilesText}"
+                               Style="{DynamicResource HintTextStyle}"
+                               Margin="0,12,0,0" />
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

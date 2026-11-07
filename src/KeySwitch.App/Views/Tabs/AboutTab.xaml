@@ -1,0 +1,120 @@
+<UserControl x:Class="KeySwitch.App.Views.Tabs.AboutTab"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             FontFamily="{DynamicResource AppFontFamily}"
+             FontSize="14"
+             Foreground="{DynamicResource TextPrimaryBrush}">
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                  HorizontalScrollBarVisibility="Disabled"
+                  Focusable="False">
+        <StackPanel MaxWidth="760"
+                    Margin="26,18,26,24"
+                    HorizontalAlignment="Center">
+
+            <Border Style="{DynamicResource CardStyle}" Margin="0,0,0,18">
+                <StackPanel>
+                    <StackPanel Orientation="Horizontal">
+                        <Border Width="40"
+                                Height="40"
+                                CornerRadius="10"
+                                Background="{DynamicResource AccentBrush}"
+                                VerticalAlignment="Center">
+                            <TextBlock Text="KS"
+                                       Foreground="{DynamicResource TextOnAccentBrush}"
+                                       FontFamily="{DynamicResource AppFontFamilyDisplay}"
+                                       FontSize="16"
+                                       FontWeight="SemiBold"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center" />
+                        </Border>
+                        <StackPanel Margin="14,0,0,0" VerticalAlignment="Center">
+                            <TextBlock Text="KeySwitch"
+                                       Style="{DynamicResource TitleTextStyle}" />
+                            <TextBlock Foreground="{DynamicResource TextSecondaryBrush}"
+                                       FontSize="13">
+                                <Run Text="Версия " />
+                                <Run Text="{Binding VersionText, Mode=OneWay}" />
+                                <Run Text=" · автопереключатель раскладки RU ↔ EN" />
+                            </TextBlock>
+                        </StackPanel>
+                    </StackPanel>
+
+                    <Border Style="{DynamicResource DividerStyle}" Margin="0,16,0,12" />
+
+                    <TextBlock Style="{DynamicResource HintTextStyle}"
+                               TextWrapping="Wrap"
+                               Text="Переключает раскладку автоматически, когда слово набрано не в том языке. Работает локально: ввод не покидает компьютер, сеть не используется." />
+
+                    <TextBlock Style="{DynamicResource HintTextStyle}"
+                               Margin="0,10,0,0"
+                               TextWrapping="Wrap"
+                               Text="{Binding LearningSummary}" />
+                </StackPanel>
+            </Border>
+
+            <TextBlock Text="Ограничения" Style="{DynamicResource SectionTitleStyle}" Margin="2,0,0,10" />
+
+            <Border Style="{DynamicResource CardStyle}" Margin="0,0,0,18">
+                <StackPanel>
+                    <TextBlock Style="{DynamicResource HintTextStyle}"
+                               TextWrapping="Wrap"
+                               Text="• Удалённый рабочий стол (RDP) и виртуальные машины: низкоуровневый хук может не видеть ввод. В этих сессиях автопереключение может не срабатывать." />
+                    <TextBlock Style="{DynamicResource HintTextStyle}"
+                               Margin="0,8,0,0"
+                               TextWrapping="Wrap"
+                               Text="• Умляуты и нестандартные раскладки: поддерживается пара US ↔ ЙЦУКЕН. Другие пары, включая немецкую раскладку с умляутами, не гарантируются." />
+                    <TextBlock Style="{DynamicResource HintTextStyle}"
+                               Margin="0,8,0,0"
+                               TextWrapping="Wrap"
+                               Text="• Аббревиатуры и код: слова из 1–3 символов, идентификаторы и имена переменных не трогаются, чтобы не портить код и сокращения." />
+                    <TextBlock Style="{DynamicResource HintTextStyle}"
+                               Margin="0,8,0,0"
+                               TextWrapping="Wrap"
+                               Text="• Искусственные языки и редкие слова: решение принимается по словарю и n-граммам, поэтому незнакомое слово может остаться без исправления." />
+                    <TextBlock Style="{DynamicResource HintTextStyle}"
+                               Margin="0,8,0,0"
+                               TextWrapping="Wrap"
+                               Text="• Игры и приложения с прямым вводом (DirectInput): в них автопереключение не работает. Добавляйте такие программы в исключения." />
+                </StackPanel>
+            </Border>
+
+            <TextBlock Text="Данные и лицензии" Style="{DynamicResource SectionTitleStyle}" Margin="2,0,0,10" />
+
+            <Border Style="{DynamicResource CardStyle}">
+                <StackPanel>
+                    <TextBlock Text="Папка данных"
+                               FontWeight="SemiBold"
+                               Margin="0,0,0,4" />
+                    <TextBlock Text="{Binding DataFolderPath}"
+                               Style="{DynamicResource HintTextStyle}"
+                               TextWrapping="Wrap" />
+
+                    <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                        <Button Content="Открыть папку данных"
+                                Command="{Binding OpenDataFolderCommand}" />
+                        <Button Content="Открыть README"
+                                Margin="10,0,0,0"
+                                Style="{DynamicResource LinkButtonStyle}"
+                                Command="{Binding OpenReadmeCommand}" />
+                    </StackPanel>
+
+                    <Border Style="{DynamicResource DividerStyle}" Margin="0,16,0,12" />
+
+                    <TextBlock Text="Словари и лицензии"
+                               FontWeight="SemiBold"
+                               Margin="0,0,0,6" />
+                    <TextBox Text="{Binding LicensesText, Mode=OneWay}"
+                             IsReadOnly="True"
+                             AcceptsReturn="True"
+                             TextWrapping="Wrap"
+                             MinHeight="120"
+                             MaxHeight="180"
+                             FontSize="12"
+                             VerticalScrollBarVisibility="Auto"
+                             HorizontalScrollBarVisibility="Disabled" />
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

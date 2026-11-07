@@ -1,0 +1,185 @@
+<UserControl x:Class="KeySwitch.App.Views.Tabs.GeneralTab"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="clr-namespace:KeySwitch.App.Views.Controls"
+             xmlns:vm="clr-namespace:KeySwitch.App.ViewModels"
+             FontFamily="{DynamicResource AppFontFamily}"
+             FontSize="14"
+             Foreground="{DynamicResource TextPrimaryBrush}">
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                  HorizontalScrollBarVisibility="Disabled"
+                  Focusable="False">
+        <StackPanel MaxWidth="760"
+                    Margin="26,18,26,24"
+                    HorizontalAlignment="Center">
+
+            <TextBlock Text="Поведение" Style="{DynamicResource SectionTitleStyle}" Margin="2,0,0,10" />
+
+            <Border Style="{DynamicResource CardStyle}" Margin="0,0,0,18">
+                <StackPanel>
+                    <controls:SettingRow Header="KeySwitch включён"
+                                         Description="Автопереключение, значок в трее и горячие клавиши работают, пока переключатель включён.">
+                        <ToggleButton Style="{DynamicResource ToggleSwitchStyle}"
+                                      IsChecked="{Binding Enabled, Mode=TwoWay}" />
+                    </controls:SettingRow>
+
+                    <Border Style="{DynamicResource DividerStyle}" />
+
+                    <controls:SettingRow Header="Автоматически исправлять раскладку"
+                                         Description="Следить за последним словом и менять раскладку, когда оно набрано не в той.">
+                        <ToggleButton Style="{DynamicResource ToggleSwitchStyle}"
+                                      IsChecked="{Binding AutoSwitch, Mode=TwoWay}"
+                                      IsEnabled="{Binding Enabled}" />
+                    </controls:SettingRow>
+                </StackPanel>
+            </Border>
+
+            <TextBlock Text="Раннее срабатывание" Style="{DynamicResource SectionTitleStyle}" Margin="2,0,0,10" />
+
+            <Border Style="{DynamicResource CardStyle}" Margin="0,0,0,18">
+                <StackPanel>
+                    <controls:SettingRow Header="Исправлять до пробела"
+                                         Description="Переключать раскладку сразу, как только слово стало достаточно однозначным, не дожидаясь пробела.">
+                        <ToggleButton Style="{DynamicResource ToggleSwitchStyle}"
+                                      IsChecked="{Binding EarlySwitchEnabled, Mode=TwoWay}"
+                                      IsEnabled="{Binding Enabled}" />
+                    </controls:SettingRow>
+
+                    <Border Style="{DynamicResource DividerStyle}" />
+
+                    <controls:SettingRow Header="Минимальная длина слова"
+                                         Description="Слова короче не трогаем: короткие слова слишком легко испортить."
+                                         IsEnabled="{Binding EarlySwitchEnabled}">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBox Width="64"
+                                     HorizontalContentAlignment="Center"
+                                     Text="{Binding EarlySwitchMinLength, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" />
+                            <TextBlock Text="символов"
+                                       Margin="10,0,0,0"
+                                       VerticalAlignment="Center"
+                                       Foreground="{DynamicResource TextSecondaryBrush}" />
+                        </StackPanel>
+                    </controls:SettingRow>
+                </StackPanel>
+            </Border>
+
+            <TextBlock Text="Клавиши и жесты" Style="{DynamicResource SectionTitleStyle}" Margin="2,0,0,10" />
+
+            <Border Style="{DynamicResource CardStyle}" Margin="0,0,0,18">
+                <StackPanel>
+                    <controls:SettingRow Header="Одиночный Shift переключает раскладку"
+                                         Description="Одиночное нажатие Shift без других клавиш меняет язык ввода.">
+                        <ToggleButton Style="{DynamicResource ToggleSwitchStyle}"
+                                      IsChecked="{Binding SingleShiftSwitch, Mode=TwoWay}"
+                                      IsEnabled="{Binding Enabled}" />
+                    </controls:SettingRow>
+
+                    <Border Style="{DynamicResource DividerStyle}" />
+
+                    <controls:SettingRow Header="Двойной Shift отменяет автопереключение"
+                                         Description="Быстрое двойное нажатие Shift возвращает слово в исходном виде.">
+                        <ToggleButton Style="{DynamicResource ToggleSwitchStyle}"
+                                      IsChecked="{Binding DoubleShiftUndo, Mode=TwoWay}"
+                                      IsEnabled="{Binding Enabled}" />
+                    </controls:SettingRow>
+
+                    <Border Style="{DynamicResource DividerStyle}" />
+
+                    <controls:SettingRow Header="Ручная конвертация выделенного"
+                                         Description="Сочетание для принудительной смены раскладки. Нажмите на поле и введите сочетание; пусто — выключено.">
+                        <controls:HotkeyBox Width="210"
+                                            Value="{Binding ManualConvertHotkey, Mode=TwoWay}" />
+                    </controls:SettingRow>
+
+                    <Border Style="{DynamicResource DividerStyle}" />
+
+                    <controls:SettingRow Header="Pause/Break — пауза"
+                                         Description="Фиксированная клавиша: временно приостановить автопереключение.">
+                        <ToggleButton Style="{DynamicResource ToggleSwitchStyle}"
+                                      IsChecked="{Binding PauseHotkeyEnabled, Mode=TwoWay}"
+                                      IsEnabled="{Binding Enabled}" />
+                    </controls:SettingRow>
+                </StackPanel>
+            </Border>
+
+            <TextBlock Text="Точность" Style="{DynamicResource SectionTitleStyle}" Margin="2,0,0,10" />
+
+            <Border Style="{DynamicResource CardStyle}" Margin="0,0,0,18">
+                <StackPanel>
+                    <controls:SettingRow Header="Порог уверенности"
+                                         Description="Насколько уверенно движок должен распознать опечатку. Меньше — срабатывает чаще, больше — осторожнее.">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <Slider Width="240"
+                                    Minimum="0.5"
+                                    Maximum="5.0"
+                                    SmallChange="0.1"
+                                    LargeChange="0.5"
+                                    Value="{Binding ConfidenceThreshold, Mode=TwoWay}" />
+                            <TextBlock Width="44"
+                                       Margin="10,0,0,0"
+                                       VerticalAlignment="Center"
+                                       TextAlignment="Right"
+                                       Foreground="{DynamicResource TextSecondaryBrush}"
+                                       Text="{Binding ConfidenceThreshold, Converter={StaticResource NumberFormat}, ConverterParameter=0.0}" />
+                        </StackPanel>
+                    </controls:SettingRow>
+                </StackPanel>
+            </Border>
+
+            <TextBlock Text="Запуск и безопасность" Style="{DynamicResource SectionTitleStyle}" Margin="2,0,0,10" />
+
+            <Border Style="{DynamicResource CardStyle}" Margin="0,0,0,18">
+                <StackPanel>
+                    <controls:SettingRow Header="Запускать при входе в Windows"
+                                         Description="Приложение будет стартовать вместе с системой и жить в трее.">
+                        <ToggleButton Style="{DynamicResource ToggleSwitchStyle}"
+                                      IsChecked="{Binding StartWithWindows, Mode=TwoWay}" />
+                    </controls:SettingRow>
+
+                    <Border Style="{DynamicResource DividerStyle}" />
+
+                    <controls:SettingRow Header="Запускать от администратора"
+                                         Description="Нужно, чтобы хук работал в приложениях, запущенных с повышенными правами.">
+                        <ToggleButton Style="{DynamicResource ToggleSwitchStyle}"
+                                      IsChecked="{Binding RunAsAdmin, Mode=TwoWay}" />
+                    </controls:SettingRow>
+
+                    <Border Style="{DynamicResource DividerStyle}" />
+
+                    <controls:SettingRow Header="Безопасный режим"
+                                         Description="Без хука клавиатуры и обучения — только ручная конвертация и настройки. Полезно, если что-то мешает работе системы.">
+                        <ToggleButton Style="{DynamicResource ToggleSwitchStyle}"
+                                      IsChecked="{Binding SafeMode, Mode=TwoWay}" />
+                    </controls:SettingRow>
+                </StackPanel>
+            </Border>
+
+            <TextBlock Text="Оформление" Style="{DynamicResource SectionTitleStyle}" Margin="2,0,0,10" />
+
+            <Border Style="{DynamicResource CardStyle}">
+                <StackPanel>
+                    <controls:SettingRow Header="Тема"
+                                         Description="Системная тема следует за оформлением Windows.">
+                        <ComboBox Width="200"
+                                  ItemsSource="{x:Static vm:OptionLists.Themes}"
+                                  DisplayMemberPath="Title"
+                                  SelectedValuePath="Value"
+                                  SelectedValue="{Binding ThemeValue, Mode=TwoWay}" />
+                    </controls:SettingRow>
+
+                    <Border Style="{DynamicResource DividerStyle}" />
+
+                    <controls:SettingRow Header="Язык интерфейса"
+                                         Description="Применится после перезапуска приложения.">
+                        <ComboBox Width="200"
+                                  ItemsSource="{x:Static vm:OptionLists.Languages}"
+                                  DisplayMemberPath="Title"
+                                  SelectedValuePath="Value"
+                                  SelectedValue="{Binding LanguageValue, Mode=TwoWay}" />
+                    </controls:SettingRow>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

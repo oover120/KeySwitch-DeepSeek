@@ -1,0 +1,719 @@
+using System.Threading;
+using KeySwitch.Core.Correction;
+using KeySwitch.Core.Engine;
+using KeySwitch.Core.Input;
+using KeySwitch.Core.Layout;
+using KeySwitch.Data;
+using KeySwitch.Hooks;
+
+// UseWindowsForms добавляет глобальные using System.Windows.Forms — уточняем, чей Timer нужен.
+using Timer = System.Threading.Timer;
+
+namespace KeySwitch.App.Services;
+
+/// <summary>
+/// Сердце приложения: синхронная обработка нажатий в хуке и запуск исправлений в фоне.
+///
+/// Правила, которые здесь зашиты:
+/// * обработчик хука не делает ничего дороже нескольких микросекунд — только классификация,
+///   буфер и постановка плана в очередь (буфер обмена и SendInput живут в <see cref="PlanExecutor"/>);
+/// * план исправления — единственное основание перехватить нажатие (Handled = true), и только
+///   для Enter/Tab: обычный терминатор (пробел, «.», «,») система уже доставила в окно, поэтому
+///   его перехват сломал бы набор;
+/// * пока выполняется план, нажатия пользователя складываются в очередь и воспроизводятся после;
+/// * двойной Shift (два «тапа» меньше 400 мс без других клавиш) отменяет последнее исправление;
+/// * Ctrl+Alt+P — пауза автопереключения (решение зафиксировано в docs/notes/app.md).
+/// </summary>
+public sealed class AutoSwitchService : IDisposable
+{
+    // Низкоуровневый хук отдаёт левый/правый Shift как отдельные клавиши (0xA0/0xA1),
+    // KeyClassifier.VkShift (0x10) в WH_KEYBOARD_LL не приходит.
+    private const int VkLShift = 0xA0;
+    private const int VkRShift = 0xA1;
+    private const int VkC = 0x43;
+    private const int VkV = 0x56;
+
+    private const int ShiftTapMaxMs = 400;
+    private const int ShiftCancelWindowMs = 400;
+    private const int SelectionCopyTimeoutMs = 500;
+    private const int PasteDelayMs = 90;
+
+    private const string PauseHotkeySpec = "Ctrl+Alt+P";
+
+    private readonly AppSettings _settings;
+    private readonly SettingsStore _store;
+    private readonly CorrectionEngine _engine;
+    private readonly PlanExecutor _executor;
+    private readonly KeyboardHook _hook;
+    private readonly InputSender _sender;
+    private readonly LayoutSwitcher _layouts;
+    private readonly ClipboardHelper _clipboard;
+    private readonly ForegroundTracker _tracker;
+    private readonly ExceptionStore _exceptions;
+    private readonly SoundService? _sound;
+    private readonly AppLogger _logger;
+
+    private readonly Hotkey? _pauseHotkey = Hotkey.TryParse(PauseHotkeySpec);
+    private readonly Timer _singleShiftTimer;
+    private Hotkey? _manualHotkey;
+
+    private long _shiftDownAt;
+    private bool _shiftHadOtherKey;
+    private bool _keySinceShiftTap;
+    private long _lastShiftTapAt = long.MinValue / 2;
+    private IntPtr _singleShiftWindow;
+    private int _singleShiftPending;
+
+    private bool _passwordLike;
+    private volatile bool _started;
+    private bool _disposed;
+
+    public AutoSwitchService(
+        AppSettings settings,
+        SettingsStore store,
+        CorrectionEngine engine,
+        PlanExecutor executor,
+        KeyboardHook hook,
+        InputSender sender,
+        LayoutSwitcher layouts,
+        ClipboardHelper clipboard,
+        ForegroundTracker tracker,
+        ExceptionStore exceptions,
+        SoundService? sound,
+        AppLogger logger)
+    {
+        _settings = settings ?? throw new ArgumentNullException(nameof(settings));
+        _store = store ?? throw new ArgumentNullException(nameof(store));
+        _engine = engine ?? throw new ArgumentNullException(nameof(engine));
+        _executor = executor ?? throw new ArgumentNullException(nameof(executor));
+        _hook = hook ?? throw new ArgumentNullException(nameof(hook));
+        _sender = sender ?? throw new ArgumentNullException(nameof(sender));
+        _layouts = layouts ?? throw new ArgumentNullException(nameof(layouts));
+        _clipboard = clipboard ?? throw new ArgumentNullException(nameof(clipboard));
+        _tracker = tracker ?? throw new ArgumentNullException(nameof(tracker));
+        _exceptions = exceptions ?? throw new ArgumentNullException(nameof(exceptions));
+        _sound = sound;
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+
+        _manualHotkey = Hotkey.TryParse(settings.ManualConvertHotkey);
+        _singleShiftTimer = new Timer(_ => OnSingleShiftTimeout(), null, Timeout.Infinite, Timeout.Infinite);
+
+        ApplyDetectionSettings();
+    }
+
+    /// <summary>Автопереключение включено пользователем.</summary>
+    public bool Enabled => _settings.Enabled;
+
+    /// <summary>Хук запущен (в SafeMode не запускается).</summary>
+    public bool IsStarted => _started;
+
+    /// <summary>Включение/выключение из трея или горячей клавишей.</summary>
+    public event EventHandler? StateChanged;
+
+    public void Start()
+    {
+        if (_disposed || _started)
+            return;
+
+        _hook.KeyEvent += OnKeyEvent;
+        try
+        {
+            _hook.Start();
+            _started = true;
+            _logger.Info("Автопереключение запущено.");
+        }
+        catch (Exception ex)
+        {
+            _hook.KeyEvent -= OnKeyEvent;
+            _logger.Error("Не удалось запустить хук клавиатуры", ex);
+            throw;
+        }
+
+        StateChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    public void Stop()
+    {
+        if (!_started)
+            return;
+
+        _hook.KeyEvent -= OnKeyEvent;
+        _hook.Stop();
+        _started = false;
+        _logger.Info("Автопереключение остановлено.");
+        StateChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>Перечитать настройки после «Сохранить» в окне настроек.</summary>
+    public void Reconfigure()
+    {
+        _manualHotkey = Hotkey.TryParse(_settings.ManualConvertHotkey);
+        ApplyDetectionSettings();
+
+        if (!_settings.Enabled)
+            ResetState();
+
+        StateChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>Включить/выключить автопереключение (трей и Ctrl+Alt+P). Сохраняет настройки.</summary>
+    public void ToggleEnabled()
+    {
+        _settings.Enabled = !_settings.Enabled;
+        ResetState();
+        try
+        {
+            _store.Save();
+        }
+        catch (Exception ex)
+        {
+            _logger.Error("Не удалось сохранить настройки после переключения", ex);
+        }
+
+        _logger.Info(_settings.Enabled ? "Автопереключение включено." : "Автопереключение выключено.");
+        StateChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>Ручная конвертация выделения (или последнего слова) — для трея/горячей клавиши.</summary>
+    public void RequestManualConvert()
+    {
+        if (_executor.IsBusy)
+            return;
+
+        IntPtr window = _tracker.Get().Handle;
+        string layoutId = ResolveLayoutId();
+        _executor.ExecuteExclusive(() => ConvertSelectionCore(window, layoutId));
+    }
+
+    // ------------------------------------------------------------ хук
+
+    private void OnKeyEvent(object? sender, KeyboardHookEventArgs e)
+    {
+        if (e.IsInjected || e.IsOurEvent)
+            return;
+
+        try
+        {
+            // Пока идёт исправление, нажатия не отдаём приложению: соберём и воспроизведём
+            // после, иначе быстрый набор попадёт между Backspace и новым текстом.
+            if (_executor.IsBusy)
+            {
+                if (_executor.TryBlockKey(ToReplayItem(e)))
+                    e.Handled = true;
+                return;
+            }
+
+            if (e.IsKeyDown)
+                OnKeyDown(e);
+            else
+                OnKeyUp(e);
+        }
+        catch (Exception ex)
+        {
+            _logger.Error("Ошибка обработки нажатия", ex);
+        }
+    }
+
+    private void OnKeyDown(KeyboardHookEventArgs e)
+    {
+        int vk = e.VirtualKey;
+
+        // 1. Горячие клавиши обрабатываются до всех проверок режимов: пауза должна
+        //    работать и в исключённом приложении, иначе из неё не выбраться.
+        if (_pauseHotkey is not null && _pauseHotkey.Matches(vk, e.Ctrl, e.Alt, e.Shift, e.Win))
+        {
+            e.Handled = true;
+            ToggleEnabled();
+            return;
+        }
+
+        if (vk is VkLShift or VkRShift)
+        {
+            _shiftDownAt = Environment.TickCount64;
+            _shiftHadOtherKey = false;
+            return;
+        }
+
+        // Любая другая клавиша между нажатиями Shift снимает «тап».
+        _shiftHadOtherKey = true;
+        _keySinceShiftTap = true;
+
+        if (!_settings.Enabled)
+            return;
+
+        if (vk == KeyClassifier.VkPause && _settings.PauseHotkeyEnabled)
+        {
+            e.Handled = true;
+            HandlePause();
+            return;
+        }
+
+        if (_manualHotkey is not null && _manualHotkey.Matches(vk, e.Ctrl, e.Alt, e.Shift, e.Win))
+        {
+            e.Handled = true;
+            RequestManualConvert();
+            return;
+        }
+
+        var info = _tracker.Get();
+        var mode = ResolveMode(info);
+        if (mode == ExceptionMode.Disabled || IsGameOrProtected(info))
+        {
+            ResetState();
+            return;
+        }
+
+        // AutoSwitch выключен или процесс в ManualOnly: буфер ведём, но планы не исполняем —
+        // это нужно, чтобы работала ручная конвертация последнего слова.
+        bool auto = _settings.AutoSwitch && mode == ExceptionMode.Full;
+
+        var role = KeyClassifier.Classify(vk, e.Ctrl, e.Alt, e.Win, e.Character);
+        switch (role)
+        {
+            case KeyRole.Ignore:
+                return;
+
+            case KeyRole.Reset:
+                ResetState();
+                _engine.ClearUndo();
+                return;
+
+            case KeyRole.Backspace:
+                if (_engine.Buffer.IsEmpty)
+                    _engine.ClearUndo();
+                _engine.Backspace();
+                return;
+
+            case KeyRole.WordChar:
+                HandleWordChar(e, info, auto);
+                return;
+
+            case KeyRole.Terminator:
+                HandleTerminator(e, info, auto);
+                return;
+        }
+    }
+
+    private void OnKeyUp(KeyboardHookEventArgs e)
+    {
+        if (e.VirtualKey is not (VkLShift or VkRShift))
+            return;
+
+        bool tap = !_shiftHadOtherKey && Environment.TickCount64 - _shiftDownAt <= ShiftTapMaxMs;
+        _shiftHadOtherKey = false;
+        if (!tap || !_settings.Enabled)
+            return;
+
+        long now = Environment.TickCount64;
+
+        bool doubleTap = _settings.DoubleShiftUndo &&
+                         now - _lastShiftTapAt <= ShiftCancelWindowMs &&
+                         !_keySinceShiftTap;
+
+        _lastShiftTapAt = now;
+        _keySinceShiftTap = false;
+
+        if (doubleTap)
+        {
+            // Второй «тап» без других клавиш в пределах окна — отмена последнего исправления.
+            _lastShiftTapAt = long.MinValue / 2;
+            CancelSingleShiftSwitch();
+            TryUndo("двойной Shift");
+            return;
+        }
+
+        if (!_settings.SingleShiftSwitch)
+            return;
+
+        _singleShiftWindow = _tracker.Get().Handle;
+        if (_settings.DoubleShiftUndo)
+        {
+            // Ждём, не будет ли второго тапа: иначе одиночный Shift и двойной конфликтуют.
+            Interlocked.Exchange(ref _singleShiftPending, 1);
+            _singleShiftTimer.Change(ShiftCancelWindowMs, Timeout.Infinite);
+        }
+        else
+        {
+            SwitchLayoutNow(_singleShiftWindow);
+        }
+    }
+
+    private void HandleWordChar(KeyboardHookEventArgs e, ForegroundWindowInfo info, bool auto)
+    {
+        if (e.Character is not { } ch)
+            return;
+
+        // Поле пароля — не трогаем вообще: ни буфера, ни переключений.
+        if (_tracker.IsPasswordField(_settings.PasswordProtectionEnabled))
+        {
+            _passwordLike = true;
+            _engine.Reset();
+            return;
+        }
+
+        if (_passwordLike)
+            return;
+
+        string layoutId = ResolveLayoutId(info);
+        var stroke = new KeyStroke(e.VirtualKey, e.Shift, e.CapsLock, e.ScanCode);
+        _engine.AppendChar(stroke, ch, layoutId);
+
+        // Эвристика «похоже на пароль»: строчные + заглавные + цифры/знаки и длина > 6.
+        // Такой ввод не исправляем и раскладку не трогаем — оставляем как набрано.
+        if (_settings.PasswordProtectionEnabled && LooksLikePassword(_engine.Buffer.Text))
+        {
+            _passwordLike = true;
+            _engine.Reset();
+            _engine.ClearUndo();
+            _logger.Debug("Похоже на пароль — автопереключение для слова отключено.");
+            return;
+        }
+
+        if (!auto || _engine.Buffer.IsEmpty)
+            return;
+
+        var plan = _engine.TryEarlySwitch();
+        if (plan is null)
+            return;
+
+        // Раннее переключение перехватывает текущую клавишу: иначе наши Backspace могут
+        // выполниться раньше, чем система доставит её в окно, и удалят лишний символ.
+        // Перехватили — значит на экране ещё нет последнего символа: DeleteCount на 1 меньше,
+        // а ReplacementText уже содержит его сконвертированным.
+        e.Handled = true;
+        var adjusted = plan.DeleteCount > 1
+            ? plan with { DeleteCount = plan.DeleteCount - 1 }
+            : plan;
+        _executor.ExecutePlan(adjusted, info.Handle);
+        PlayFixSound();
+    }
+
+    private void HandleTerminator(KeyboardHookEventArgs e, ForegroundWindowInfo info, bool auto)
+    {
+        char? terminator = e.Character ?? DefaultTerminator(e.VirtualKey);
+        bool swallowed = e.VirtualKey is KeyClassifier.VkReturn or KeyClassifier.VkTab;
+
+        // Enter/Tab перехватываем: иначе они сработают в чужом окне до того, как мы исправим слово.
+        // Терминатор известен всегда: если клавишу проглотили — её напечатает executor, если она уже
+        // дошла до окна — движок добавил её к DeleteCount и вернёт вместе с исправленным словом.
+        var result = _engine.CompleteWord(terminator, terminatorAlreadyTyped: !swallowed);
+
+        _passwordLike = false;
+
+        if (result.Plan is not { } plan || !auto)
+            return;
+
+        if (swallowed)
+            e.Handled = true;
+
+        _executor.ExecutePlan(plan, info.Handle);
+        PlayFixSound();
+    }
+
+    private void HandlePause()
+    {
+        // Pause/Break: сначала отмена последнего исправления, если отменять нечего —
+        // ручная конвертация последнего слова.
+        if (_engine.CanUndo)
+        {
+            TryUndo("Pause/Break");
+            return;
+        }
+
+        var result = _engine.ConvertManually();
+        if (result.Plan is not { } plan)
+        {
+            _logger.Debug("Pause/Break: конвертировать нечего.");
+            return;
+        }
+
+        IntPtr window = _tracker.Get().Handle;
+        _executor.ExecutePlan(plan, window);
+        PlayFixSound();
+    }
+
+    private bool TryUndo(string reason)
+    {
+        if (!_engine.TryUndo(out var plan) || plan is null)
+        {
+            _logger.Debug($"{reason}: отменять нечего.");
+            return false;
+        }
+
+        _executor.ExecuteUndo(plan, _tracker.Get().Handle);
+        PlayFixSound();
+        _logger.Debug($"Отмена исправления ({reason}).");
+        return true;
+    }
+
+    // ------------------------------------------------------------ выделение
+
+    private void ConvertSelectionCore(IntPtr window, string layoutId)
+    {
+        string? snapshot = _clipboard.CaptureAll();
+
+        try
+        {
+            // Очищаем буфер, чтобы отличить «выделения нет» от «выделение совпало с буфером».
+            _clipboard.SetText(string.Empty);
+            SendCtrlC();
+
+            string? text = WaitForClipboardText(SelectionCopyTimeoutMs);
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                // Выделения нет — конвертируем последнее слово (Pause-путь).
+                _clipboard.RestoreAll(snapshot);
+                var manual = _engine.ConvertManually();
+                if (manual.Plan is { } plan)
+                {
+                    _executor.ExecutePlanNow(plan, window);
+                    PlayFixSound();
+                }
+
+                return;
+            }
+
+            var selectionPlan = _engine.ConvertSelection(text, layoutId);
+            if (selectionPlan is null)
+            {
+                _clipboard.RestoreAll(snapshot);
+                _logger.Debug("Выделение: конвертация не требуется.");
+                return;
+            }
+
+            _layouts.Ensure(window, selectionPlan.TargetLayoutId);
+            _clipboard.SetText(selectionPlan.ReplacementText);
+            SendCtrlV();
+            Thread.Sleep(PasteDelayMs);
+
+            if (snapshot is null)
+                _clipboard.SetText(string.Empty);
+            else
+                _clipboard.RestoreAll(snapshot);
+
+            PlayFixSound();
+            _logger.Debug("Выделение сконвертировано.");
+        }
+        catch (Exception ex)
+        {
+            _logger.Error("Ошибка конвертации выделения", ex);
+            _clipboard.RestoreAll(snapshot);
+        }
+        finally
+        {
+            // Undo для конвертации выделения не поддерживается: выделение уже заменено.
+            _engine.ClearUndo();
+        }
+    }
+
+    private string? WaitForClipboardText(int timeoutMs)
+    {
+        long deadline = Environment.TickCount64 + timeoutMs;
+        while (Environment.TickCount64 < deadline)
+        {
+            Thread.Sleep(10);
+            string? text = _clipboard.GetText();
+            if (!string.IsNullOrEmpty(text))
+                return text;
+        }
+
+        return null;
+    }
+
+    private void SendCtrlC() => SendCtrlKey(VkC);
+
+    private void SendCtrlV() => SendCtrlKey(VkV);
+
+    private void SendCtrlKey(int virtualKey)
+    {
+        _sender.SendKeyStroke(KeyClassifier.VkControl, false, keyUp: false);
+        _sender.SendKeyStroke(virtualKey, false, keyUp: false);
+        _sender.SendKeyStroke(virtualKey, false, keyUp: true);
+        _sender.SendKeyStroke(KeyClassifier.VkControl, false, keyUp: true);
+    }
+
+    // ------------------------------------------------------------ вспомогательное
+
+    private void ApplyDetectionSettings()
+    {
+        var detection = _engine.Settings;
+        detection.ConfidenceThreshold = _settings.ConfidenceThreshold;
+        detection.NoDictionaryThresholdMultiplier = _settings.NoDictionaryThresholdMultiplier;
+        detection.EarlySwitchEnabled = _settings.EarlySwitchEnabled;
+        detection.EarlySwitchMinLength = _settings.EarlySwitchMinLength;
+        detection.EarlySwitchThreshold = _settings.EarlySwitchThreshold;
+    }
+
+    private ExceptionMode ResolveMode(ForegroundWindowInfo info)
+    {
+        try
+        {
+            return _exceptions.GetMode(info.ProcessName, info.ProcessPath);
+        }
+        catch (Exception ex)
+        {
+            _logger.Debug($"ExceptionStore.GetMode: {ex.Message}");
+            return ExceptionMode.Full;
+        }
+    }
+
+    private bool IsGameOrProtected(ForegroundWindowInfo info)
+    {
+        if (_settings.GameDetectionEnabled)
+        {
+            if (info.IsFullscreen)
+                return true;
+
+            if (ExceptionStore.IsGamesFolder(info.ProcessPath))
+                return true;
+        }
+
+        // Окно с повышенными правами при обычном запуске: UIPI не даст отправить в него ввод,
+        // а исправление «вслепую» только испортит текст.
+        return info.IsElevated && !ElevationHelper.IsProcessElevated;
+    }
+
+    private string ResolveLayoutId(ForegroundWindowInfo info)
+    {
+        if (LayoutCatalog.TryGet(info.LayoutId) is not null)
+            return info.LayoutId;
+
+        try
+        {
+            string current = _layouts.GetLayoutId(info.Handle);
+            if (LayoutCatalog.TryGet(current) is not null)
+                return current;
+        }
+        catch (Exception ex)
+        {
+            _logger.Debug($"GetLayoutId: {ex.Message}");
+        }
+
+        return LayoutCatalog.EnUsId;
+    }
+
+    private string ResolveLayoutId() => ResolveLayoutId(_tracker.Get());
+
+    private void SwitchLayoutNow(IntPtr window)
+    {
+        string current = ResolveLayoutId(_tracker.Get());
+        string target = string.Equals(current, LayoutCatalog.EnUsId, StringComparison.OrdinalIgnoreCase)
+            ? LayoutCatalog.RuRuId
+            : LayoutCatalog.EnUsId;
+
+        try
+        {
+            if (_layouts.SwitchTo(window, target))
+                PlaySwitchSound();
+        }
+        catch (Exception ex)
+        {
+            _logger.Error("Не удалось переключить раскладку", ex);
+        }
+    }
+
+    private void CancelSingleShiftSwitch()
+    {
+        if (Interlocked.Exchange(ref _singleShiftPending, 0) == 0)
+            return;
+
+        try
+        {
+            _singleShiftTimer.Change(Timeout.Infinite, Timeout.Infinite);
+        }
+        catch (ObjectDisposedException)
+        {
+            // Приложение завершается.
+        }
+    }
+
+    private void OnSingleShiftTimeout()
+    {
+        if (_disposed || Interlocked.Exchange(ref _singleShiftPending, 0) == 0)
+            return;
+
+        if (!_settings.Enabled || !_settings.SingleShiftSwitch)
+            return;
+
+        SwitchLayoutNow(_singleShiftWindow);
+    }
+
+    private void ResetState()
+    {
+        _engine.Reset();
+        _passwordLike = false;
+    }
+
+    private static bool LooksLikePassword(string text)
+    {
+        if (text.Length <= 6)
+            return false;
+
+        bool lower = false, upper = false, digitOrSymbol = false;
+        foreach (char ch in text)
+        {
+            if (char.IsLower(ch)) lower = true;
+            else if (char.IsUpper(ch)) upper = true;
+            else if (char.IsDigit(ch) || (!char.IsLetter(ch) && !char.IsWhiteSpace(ch))) digitOrSymbol = true;
+        }
+
+        return lower && upper && digitOrSymbol;
+    }
+
+    private static char? DefaultTerminator(int virtualKey) => virtualKey switch
+    {
+        KeyClassifier.VkSpace => ' ',
+        KeyClassifier.VkReturn => '\r',
+        KeyClassifier.VkTab => '\t',
+        _ => null
+    };
+
+    private static KeyReplayItem ToReplayItem(KeyboardHookEventArgs e) => new(
+        e.VirtualKey,
+        e.ScanCode,
+        e.Shift,
+        e.Ctrl,
+        e.Alt,
+        e.Win,
+        e.CapsLock,
+        e.IsKeyDown,
+        e.Character);
+
+    private void PlayFixSound() => PlaySound(_settings.FixSoundPath);
+
+    private void PlaySwitchSound() => PlaySound(_settings.SwitchSoundPath);
+
+    private void PlaySound(string? path)
+    {
+        if (_sound is null || !_settings.SoundsEnabled || string.IsNullOrWhiteSpace(path))
+            return;
+
+        try
+        {
+            _sound.Play(path, _settings.SoundVolume);
+        }
+        catch (Exception ex)
+        {
+            _logger.Debug($"Звук: {ex.Message}");
+        }
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+            return;
+
+        _disposed = true;
+        Stop();
+
+        try
+        {
+            _singleShiftTimer.Change(Timeout.Infinite, Timeout.Infinite);
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+
+        _singleShiftTimer.Dispose();
+    }
+}

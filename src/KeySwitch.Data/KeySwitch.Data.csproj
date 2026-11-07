@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>KeySwitch.Data</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\KeySwitch.Core\KeySwitch.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Word lists, n-gram models, default rule files and licenses are embedded so the
+         application stays fully offline and cannot be tampered with at runtime. -->
+    <EmbeddedResource Include="Assets\**\*.gz" />
+    <EmbeddedResource Include="Assets\**\*.bin" />
+    <EmbeddedResource Include="Assets\**\*.txt" />
+    <EmbeddedResource Include="Assets\**\*.json" />
+  </ItemGroup>
+</Project>

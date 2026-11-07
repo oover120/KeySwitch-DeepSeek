@@ -1,0 +1,13 @@
+Tatoeba sentence corpora
+Sources:
+  https://downloads.tatoeba.org/exports/per_language/eng/eng_sentences.tsv.bz2
+  https://downloads.tatoeba.org/exports/per_language/rus/rus_sentences.tsv.bz2
+Site: https://tatoeba.org
+License: Creative Commons Attribution 2.0 France (CC BY 2.0 FR),
+  https://creativecommons.org/licenses/by/2.0/fr/
+Copyright: the sentences are contributed by Tatoeba community members; each sentence keeps its
+author attribution in the Tatoeba database (https://tatoeba.org). Accessed on 2026-11-06.
+
+Modified: yes. KeySwitch.BuildAssets tokenizes the sentences and derives aggregate character
+n-gram counts (ngrams-en-3.bin, ngrams-en-4.bin, ngrams-ru-3.bin, ngrams-ru-4.bin). No sentences
+are redistributed. Attribution is provided here and in docs/notes/data.md.
