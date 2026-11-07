@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using KeySwitch.Core.Correction;
 using KeySwitch.Core.Input;
 using KeySwitch.Data;
@@ -21,9 +22,10 @@ public readonly record struct KeyReplayItem(
 /// <summary>
 /// Выполнение планов исправления в фоне и очередь пользовательских нажатий.
 ///
-/// Зачем очередь: пока мы удаляем слово и печатаем исправленное, пользователь может успеть
-/// нажать следующую клавишу. Такие нажатия перехватываются хуком (Handled = true), складываются
-/// в очередь и воспроизводятся через SendInput сразу после исправления — быстрый набор не теряется.
+/// Зачем очередь: пока мы удаляем слово и печатаем исправленное, пользователь может
+/// успеть нажать следующую клавишу. Такие нажатия перехватываются хуком (Handled = true),
+/// складываются в очередь и воспроизводятся через SendInput сразу после исправления —
+/// быстрый набор не теряется.
 /// Поток выполнения — STA: в нём же работают буфер обмена и SoundPlayer-подобные API.
 /// </summary>
 public sealed class PlanExecutor : IDisposable
@@ -76,26 +78,71 @@ public sealed class PlanExecutor : IDisposable
         }
     }
 
-    /// <summary>Ставит в очередь исправление слова (с переключением раскладки).</summary>
-    public void ExecutePlan(CorrectionPlan plan, IntPtr targetWindow)
-        => ExecuteExclusive(() => ExecutePlanNow(plan, targetWindow));
+    /// <summary>
+    /// Ставит в очередь исправление слова (с переключением раскладки).
+    /// <paramref name="processName"/> нужен только для журнала и выбора паузы.
+    /// </summary>
+    public void ExecutePlan(CorrectionPlan plan, IntPtr targetWindow, string processName = "")
+        => ExecuteExclusive(() => ExecutePlanNow(plan, targetWindow, processName));
 
     /// <summary>
     /// Немедленное исправление на текущем потоке. Вызывать только с потока PlanExecutor
     /// (изнутри <see cref="ExecuteExclusive"/>) — иначе нарушится очередь нажатий.
+    ///
+    /// Порядок (требование ТЗ): пробел пользователя уже ушёл в окно → Backspace × (слово + 1)
+    /// → смена раскладки → слово и пробел. Для браузеров и Electron между стиранием и
+    /// вводом выдерживается пауза, иначе часть Backspace теряется.
     /// </summary>
-    public void ExecutePlanNow(CorrectionPlan plan, IntPtr targetWindow)
+    public void ExecutePlanNow(CorrectionPlan plan, IntPtr targetWindow, string processName = "")
     {
-        if (!string.Equals(plan.TargetLayoutId, plan.SourceLayoutId, StringComparison.OrdinalIgnoreCase))
-            _layouts.SwitchTo(targetWindow, plan.TargetLayoutId);
+        var watch = Stopwatch.StartNew();
+        string proc = string.IsNullOrWhiteSpace(processName) ? "?" : processName;
+        int pauseMs = CorrectionPacing.PauseFor(processName);
+        string layoutBefore = SafeLayoutId(targetWindow);
 
-        _sender.SendBackspaces(plan.DeleteCount);
+        _logger.Info(
+            $"Исправление: старт proc={proc} hwnd=0x{targetWindow.ToInt64():X} " +
+            $"backspaces={plan.DeleteCount} target={plan.TargetLayoutId} " +
+            $"layout_before={layoutBefore} pause={pauseMs}мс conf={plan.Confidence:0.00}");
 
-        // Терминатор отправляем отдельно: Enter/Tab должны прийти как нажатие VK,
-        // а не как Unicode-символ (иначе они не сработают в чужих приложениях).
-        _sender.SendText(plan.ReplacementText);
-        if (plan.Terminator is { } terminator)
-            _sender.SendTerminator(terminator);
+        try
+        {
+            if (pauseMs > 0)
+            {
+                // Двухфазный режим: стереть → сменить раскладку → пауза → напечатать.
+                var erase = _sender.SendBackspaces(plan.DeleteCount);
+                LogSend("Backspace", erase);
+
+                bool switched = EnsureLayout(targetWindow, plan);
+                LogLayout(targetWindow, layoutBefore, switched);
+
+                Thread.Sleep(pauseMs);
+
+                var typing = _sender.SendTextAndTerminator(plan.ReplacementText, plan.Terminator);
+                LogSend("ввод", typing);
+            }
+            else
+            {
+                // Обычный режим: раскладка меняется до пакета, потому что текст уходит
+                // Unicode-символами и от раскладки не зависит, а все события должны
+                // попасть в окно одним SendInput.
+                bool switched = EnsureLayout(targetWindow, plan);
+                LogLayout(targetWindow, layoutBefore, switched);
+
+                var result = _sender.SendCorrection(
+                    plan.DeleteCount, plan.ReplacementText, plan.Terminator, pauseMs: 0);
+                LogSend("Backspace+ввод", result);
+            }
+
+            _logger.Info($"Исправление: завершено за {watch.Elapsed.TotalMilliseconds:0} мс");
+        }
+        catch (Exception ex)
+        {
+            _logger.Error(
+                $"Исправление: исключение proc={proc} hwnd=0x{targetWindow.ToInt64():X} " +
+                $"backspaces={plan.DeleteCount} за {watch.Elapsed.TotalMilliseconds:0} мс", ex);
+            throw;
+        }
     }
 
     /// <summary>Ставит в очередь отмену исправления.</summary>
@@ -105,16 +152,32 @@ public sealed class PlanExecutor : IDisposable
     /// <summary>Немедленная отмена на текущем потоке (только с потока PlanExecutor).</summary>
     public void ExecuteUndoNow(UndoPlan plan, IntPtr targetWindow)
     {
-        if (!string.IsNullOrWhiteSpace(plan.RestoreLayoutId) &&
-            !string.Equals(plan.RestoreLayoutId, plan.CurrentLayoutId, StringComparison.OrdinalIgnoreCase))
-        {
-            _layouts.SwitchTo(targetWindow, plan.RestoreLayoutId);
-        }
+        var watch = Stopwatch.StartNew();
+        string layoutBefore = SafeLayoutId(targetWindow);
+        _logger.Info(
+            $"Отмена: старт hwnd=0x{targetWindow.ToInt64():X} backspaces={plan.DeleteCount} " +
+            $"restore={plan.RestoreLayoutId ?? "-"} layout_before={layoutBefore}");
 
-        _sender.SendBackspaces(plan.DeleteCount);
-        _sender.SendText(plan.RestoreText);
-        if (plan.Terminator is { } terminator)
-            _sender.SendTerminator(terminator);
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(plan.RestoreLayoutId) &&
+                !string.Equals(plan.RestoreLayoutId, plan.CurrentLayoutId, StringComparison.OrdinalIgnoreCase))
+            {
+                bool switched = _layouts.SwitchTo(targetWindow, plan.RestoreLayoutId);
+                LogLayout(targetWindow, layoutBefore, switched);
+            }
+
+            var result = _sender.SendCorrection(
+                plan.DeleteCount, plan.RestoreText, plan.Terminator, pauseMs: 0);
+            LogSend("Отмена: Backspace+ввод", result);
+
+            _logger.Info($"Отмена: завершено за {watch.Elapsed.TotalMilliseconds:0} мс");
+        }
+        catch (Exception ex)
+        {
+            _logger.Error($"Отмена: исключение за {watch.Elapsed.TotalMilliseconds:0} мс", ex);
+            throw;
+        }
     }
 
     /// <summary>Произвольная работа, во время которой нажатия пользователя откладываются.</summary>
@@ -265,6 +328,56 @@ public sealed class PlanExecutor : IDisposable
         _sender.SendKeyStroke(item.VirtualKey, item.Shift, keyUp: true);
     }
 
+    // ------------------------------------------------------------ журнал
+
+    private void LogSend(string step, SendResult result)
+    {
+        string message =
+            $"Исправление: {step} отправлено={result.Sent} принято={result.Inserted} " +
+            $"ошибка={result.LastError}";
+
+        if (result.Complete)
+            _logger.Info(message);
+        else
+            _logger.Warn(message + " (часть событий не принята)");
+    }
+
+    private void LogLayout(IntPtr window, string layoutBefore, bool switched)
+    {
+        string layoutAfter = SafeLayoutId(window);
+        _logger.Info(
+            $"Исправление: раскладка {layoutBefore} -> {layoutAfter} ok={switched}");
+    }
+
+    private bool EnsureLayout(IntPtr window, CorrectionPlan plan)
+    {
+        if (string.Equals(plan.TargetLayoutId, plan.SourceLayoutId, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        try
+        {
+            return _layouts.SwitchTo(window, plan.TargetLayoutId);
+        }
+        catch (Exception ex)
+        {
+            _logger.Error($"Исправление: смена раскладки на {plan.TargetLayoutId} не удалась", ex);
+            return false;
+        }
+    }
+
+    private string SafeLayoutId(IntPtr window)
+    {
+        try
+        {
+            return _layouts.GetLayoutId(window);
+        }
+        catch (Exception ex)
+        {
+            _logger.Debug($"GetLayoutId: {ex.Message}");
+            return "?";
+        }
+    }
+
     public void Dispose()
     {
         if (_disposed)
@@ -276,9 +389,9 @@ public sealed class PlanExecutor : IDisposable
         {
             _queue.CompleteAdding();
         }
-        catch
+        catch (ObjectDisposedException)
         {
-            // ignore
+            // Уже закрыта.
         }
 
         if (!_worker.Join(TimeSpan.FromSeconds(2)))

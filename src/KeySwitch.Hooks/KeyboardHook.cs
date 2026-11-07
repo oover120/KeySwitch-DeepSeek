@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using KeySwitch.Core.Layout;
 
@@ -31,6 +32,18 @@ public sealed class KeyboardHook : IDisposable
 
     /// <summary>Событие клавиатуры. Подписчик обязан работать быстро и не блокировать поток хука.</summary>
     public event EventHandler<KeyboardHookEventArgs>? KeyEvent;
+
+    /// <summary>
+    /// Порог предупреждения о медленном колбэке. Windows снимает низкоуровневый хук,
+    /// если обработчик не укладывается в свой таймаут, поэтому 20 мс — уже авария.
+    /// </summary>
+    public const double SlowCallbackThresholdMs = 20.0;
+
+    /// <summary>Куда сообщать о медленной обработке (обычно — в журнал приложения).</summary>
+    public Action<string>? Diagnostics { get; set; }
+
+    /// <summary>Длительность последнего вызова колбэка хука, мс.</summary>
+    public double LastCallbackMs { get; private set; }
 
     /// <summary>Установлен ли хук в данный момент.</summary>
     public bool IsRunning => _running;
@@ -216,6 +229,7 @@ public sealed class KeyboardHook : IDisposable
 
     private IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam)
     {
+        long startedAt = Stopwatch.GetTimestamp();
         try
         {
             if (nCode < 0)
@@ -252,6 +266,23 @@ public sealed class KeyboardHook : IDisposable
             LastError = ex;
             return NativeMethods.CallNextHookEx(IntPtr.Zero, nCode, wParam, lParam);
         }
+        finally
+        {
+            ReportTiming(startedAt);
+        }
+    }
+
+    /// <summary>
+    /// Время работы колбэка хука. Windows снимает низкоуровневый хук, если колбэк
+    /// не уложился в таймаут (~1 с), поэтому медленный колбэк — это потеря автопереключения.
+    /// </summary>
+    private void ReportTiming(long startedAt)
+    {
+        double ms = (Stopwatch.GetTimestamp() - startedAt) * 1000.0 / Stopwatch.Frequency;
+        LastCallbackMs = ms;
+
+        if (ms >= SlowCallbackThresholdMs)
+            Diagnostics?.Invoke($"Хук: обработка нажатия заняла {ms:0.0} мс (порог {SlowCallbackThresholdMs} мс)");
     }
 
     private static KeyboardHookEventArgs CreateArgs(
@@ -271,9 +302,10 @@ public sealed class KeyboardHook : IDisposable
         // Младший бит GetAsyncKeyState(VK_CAPITAL) — тумблер CapsLock (наделён глобально).
         bool capsLock = (NativeMethods.GetAsyncKeyState(NativeMethods.VK_CAPITAL) & 0x0001) != 0;
 
-        char? character = isKeyDown
-            ? ResolveCharacter(data.vkCode, data.scanCode, shift, ctrl, alt, win, capsLock)
-            : null;
+        // Символ нажатия здесь НЕ вычисляется: GetGUIThreadInfo/ToUnicodeEx — это Win32,
+        // а колбэк хука обязан вернуться за микросекунды. Символ разрешает KeyTextResolver
+        // уже в рабочем потоке (см. AutoSwitchService).
+        char? character = null;
 
         return new KeyboardHookEventArgs(
             data.vkCode, data.scanCode, isKeyDown, isInjected, isOurEvent: false,
@@ -292,92 +324,4 @@ public sealed class KeyboardHook : IDisposable
         _ => false
     };
 
-    /// <summary>
-    /// Символ нажатия. Сначала — статическая таблица раскладки (быстро, без Win32),
-    /// затем ToUnicodeEx с состоянием клавиатуры, собранным из текущего события
-    /// (GetKeyboardState на потоке хука возвращает состояние очереди этого потока,
-    /// а не глобальное, поэтому его копия не годится).
-    /// </summary>
-    private static char? ResolveCharacter(
-        int virtualKey, int scanCode, bool shift, bool ctrl, bool alt, bool win, bool capsLock)
-    {
-        // Сочетания с Ctrl/Alt/Win — это команды, а не ввод текста.
-        if (ctrl || alt || win || IsModifierKey(virtualKey))
-            return null;
-
-        (string layoutId, IntPtr hkl) = ResolveActiveLayout();
-        bool effectiveShift = shift;
-
-        LayoutTable? table = LayoutCatalog.TryGet(layoutId);
-        if (table is not null)
-        {
-            // CapsLock действует только на буквы и инвертирует регистр: upper = caps XOR shift.
-            if (table.TryMap(virtualKey, false, out char lower) && char.IsLetter(lower))
-                effectiveShift = shift ^ capsLock;
-
-            if (table.TryMap(virtualKey, effectiveShift, out char mapped))
-                return mapped;
-        }
-
-        return TranslateToUnicode(virtualKey, scanCode, effectiveShift, ctrl, alt, capsLock, hkl);
-    }
-
-    private static char? TranslateToUnicode(
-        int virtualKey, int scanCode, bool shift, bool ctrl, bool alt, bool capsLock, IntPtr hkl)
-    {
-        if (hkl == IntPtr.Zero)
-            return null;
-
-        var keyState = new byte[256];
-        if (shift)
-        {
-            keyState[NativeMethods.VK_SHIFT] = 0x80;
-            keyState[NativeMethods.VK_LSHIFT] = 0x80;
-        }
-
-        if (ctrl)
-        {
-            keyState[NativeMethods.VK_CONTROL] = 0x80;
-            keyState[NativeMethods.VK_LCONTROL] = 0x80;
-        }
-
-        if (alt)
-        {
-            keyState[NativeMethods.VK_MENU] = 0x80;
-            keyState[NativeMethods.VK_LMENU] = 0x80;
-        }
-
-        keyState[NativeMethods.VK_CAPITAL] = (byte)(capsLock ? 0x01 : 0x00);
-
-        // Флаг 0x04 (NoStateChange) не даёт ToUnicodeEx испортить внутреннее состояние
-        // dead-key системы, если пользователь нажал мёртвую клавишу.
-        const uint NoStateChange = 0x04;
-
-        var buffer = new System.Text.StringBuilder(8);
-        int count = NativeMethods.ToUnicodeEx(
-            (uint)virtualKey, (uint)scanCode, keyState, buffer, buffer.Capacity, NoStateChange, hkl);
-
-        // count == -1 — это dead key (символа пока нет), 0 — символа нет вовсе.
-        return count > 0 ? buffer[0] : null;
-    }
-
-    /// <summary>Раскладка активного потока (потока окна переднего плана).</summary>
-    private static (string LayoutId, IntPtr Hkl) ResolveActiveLayout()
-    {
-        // GetWindowThreadProcessId возвращает id ПОТОКА окна, а process id пишет в out-параметр:
-        // раскладка живёт по потокам, поэтому нужен именно возвращённый thread id.
-        uint threadId = 0;
-        IntPtr foreground = NativeMethods.GetForegroundWindow();
-        if (foreground != IntPtr.Zero)
-            threadId = NativeMethods.GetWindowThreadProcessId(foreground, out _);
-
-        if (threadId == 0)
-            threadId = NativeMethods.GetCurrentThreadId();
-
-        IntPtr hkl = NativeMethods.GetKeyboardLayout(threadId);
-        if (hkl == IntPtr.Zero)
-            hkl = NativeMethods.GetKeyboardLayout(0);
-
-        return (LayoutIds.FromHkl(hkl), hkl);
-    }
 }

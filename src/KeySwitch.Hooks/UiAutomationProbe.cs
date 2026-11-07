@@ -12,7 +12,7 @@ namespace KeySwitch.Hooks;
 public sealed class UiAutomationProbe
 {
     private const int CacheTtlMs = 1000;
-    private const int QueryTimeoutMs = 30;
+    private const int QueryTimeoutMs = 50;
     private const int MaxQueueLength = 16;
     private const int MaxCacheEntries = 64;
 

@@ -236,6 +236,61 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     internal static extern IntPtr GetForegroundWindow();
 
+    [DllImport("user32.dll")]
+    internal static extern IntPtr GetFocus();
+
+    /// <summary>Сведения о потоке GUI: активное окно и окно с фокусом ввода.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct GUITHREADINFO
+    {
+        internal int cbSize;
+        internal int flags;
+        internal IntPtr hwndActive;
+        internal IntPtr hwndFocus;
+        internal IntPtr hwndCapture;
+        internal IntPtr hwndMenuOwner;
+        internal IntPtr hwndMoveSize;
+        internal IntPtr hwndCaret;
+        internal int rcCaretLeft;
+        internal int rcCaretTop;
+        internal int rcCaretRight;
+        internal int rcCaretBottom;
+    }
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool GetGUIThreadInfo(uint idThread, ref GUITHREADINFO lpgui);
+
+    // --- WinEvent hook: отслеживание смены активного окна ---
+
+    internal const uint EVENT_SYSTEM_FOREGROUND = 0x0003;
+
+    internal const uint WINEVENT_OUTOFCONTEXT = 0x0000;
+
+    internal const uint WINEVENT_SKIPOWNPROCESS = 0x0002;
+
+    internal delegate void WinEventDelegate(
+        IntPtr hWinEventHook,
+        uint eventType,
+        IntPtr hwnd,
+        int idObject,
+        int idChild,
+        uint dwEventThread,
+        uint dwmsEventTime);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    internal static extern IntPtr SetWinEventHook(
+        uint eventMin,
+        uint eventMax,
+        IntPtr hmodWinEventProc,
+        WinEventDelegate lpfnWinEventProc,
+        uint idProcess,
+        uint idThread,
+        uint dwFlags);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    internal static extern bool UnhookWinEvent(IntPtr hWinEventHook);
+
     [DllImport("user32.dll", SetLastError = true)]
     internal static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
 

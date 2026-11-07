@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Threading;
 using KeySwitch.Core.Correction;
 using KeySwitch.Core.Engine;
@@ -11,21 +12,64 @@ using Timer = System.Threading.Timer;
 
 namespace KeySwitch.App.Services;
 
+/// <summary>Что за работа пришла из хука.</summary>
+internal enum KeyWorkKind
+{
+    /// <summary>Обычное нажатие или отпускание клавиши.</summary>
+    Key,
+
+    /// <summary>Нажата горячая клавиша паузы.</summary>
+    PauseHotkey,
+
+    /// <summary>Нажата горячая клавиша ручной конвертации.</summary>
+    ManualHotkey
+}
+
 /// <summary>
-/// Сердце приложения: синхронная обработка нажатий в хуке и запуск исправлений в фоне.
+/// Копия нажатия для рабочего потока. Хук заполняет её и сразу возвращается,
+/// поэтому здесь только значения — никаких ссылок на объекты хука.
+/// </summary>
+internal readonly record struct KeyWorkItem(
+    KeyWorkKind Kind,
+    int VirtualKey,
+    int ScanCode,
+    char? Character,
+    bool Shift,
+    bool Ctrl,
+    bool Alt,
+    bool Win,
+    bool CapsLock,
+    bool IsKeyDown,
+    bool Swallowed,
+    string? LayoutId = null)
+{
+    public static KeyWorkItem Hotkey(KeyWorkKind kind) =>
+        new(kind, 0, 0, null, false, false, false, false, false, true, false);
+}
+
+/// <summary>
+/// Сердце приложения: приём нажатий из хука и их обработка в рабочем потоке.
 ///
 /// Правила, которые здесь зашиты:
-/// * обработчик хука не делает ничего дороже нескольких микросекунд — только классификация,
-///   буфер и постановка плана в очередь (буфер обмена и SendInput живут в <see cref="PlanExecutor"/>);
+/// * колбэк хука только копирует нажатие в очередь и отвечает — вся тяжёлая работа
+///   (окно, UI Automation, детектор, SendInput, смена раскладки) идёт в рабочем потоке;
 /// * план исправления — единственное основание перехватить нажатие (Handled = true), и только
-///   для Enter/Tab: обычный терминатор (пробел, «.», «,») система уже доставила в окно, поэтому
-///   его перехват сломал бы набор;
+///   для Enter/Tab, когда в буфере есть слово: обычный терминатор (пробел, «.», «,») система
+///   уже доставила в окно, поэтому его перехват сломал бы набор;
 /// * пока выполняется план, нажатия пользователя складываются в очередь и воспроизводятся после;
 /// * двойной Shift (два «тапа» меньше 400 мс без других клавиш) отменяет последнее исправление;
 /// * Ctrl+Alt+P — пауза автопереключения (решение зафиксировано в docs/notes/app.md).
 /// </summary>
 public sealed class AutoSwitchService : IDisposable
 {
+    /// <summary>
+    /// Обрабатывать ли ввод, сгенерированный другой программой (LLKHF_INJECTED).
+    /// По умолчанию нет; переменная окружения нужна автотестам, которые печатают
+    /// через keybd_event/SendInput из стенда, а не с физической клавиатуры.
+    /// </summary>
+    internal static bool AllowInjectedInput { get; } =
+        Environment.GetEnvironmentVariable("KEYSWITCH_ALLOW_INJECTED") == "1";
+
     // Низкоуровневый хук отдаёт левый/правый Shift как отдельные клавиши (0xA0/0xA1),
     // KeyClassifier.VkShift (0x10) в WH_KEYBOARD_LL не приходит.
     private const int VkLShift = 0xA0;
@@ -49,6 +93,9 @@ public sealed class AutoSwitchService : IDisposable
     private readonly LayoutSwitcher _layouts;
     private readonly ClipboardHelper _clipboard;
     private readonly ForegroundTracker _tracker;
+
+    /// <summary>Разбор нажатия в символ и раскладку — только из рабочего потока.</summary>
+    private readonly KeyTextResolver _text = new();
     private readonly ExceptionStore _exceptions;
     private readonly SoundService? _sound;
     private readonly AppLogger _logger;
@@ -66,7 +113,13 @@ public sealed class AutoSwitchService : IDisposable
 
     private bool _passwordLike;
     private volatile bool _started;
+    private volatile bool _hasPendingWord;
     private bool _disposed;
+
+    // Очередь нажатий: хук кладёт — рабочий поток разбирает. Порядок сохраняется,
+    // поэтому буфер слова всегда видит клавиши в том же порядке, в каком их нажали.
+    private readonly BlockingCollection<KeyWorkItem> _keys = new(new ConcurrentQueue<KeyWorkItem>());
+    private readonly Thread _worker;
 
     public AutoSwitchService(
         AppSettings settings,
@@ -97,6 +150,13 @@ public sealed class AutoSwitchService : IDisposable
 
         _manualHotkey = Hotkey.TryParse(settings.ManualConvertHotkey);
         _singleShiftTimer = new Timer(_ => OnSingleShiftTimeout(), null, Timeout.Infinite, Timeout.Infinite);
+
+        _worker = new Thread(WorkerLoop)
+        {
+            IsBackground = true,
+            Name = "KeySwitch.KeyProcessor"
+        };
+        _worker.Start();
 
         ApplyDetectionSettings();
     }
@@ -187,9 +247,19 @@ public sealed class AutoSwitchService : IDisposable
 
     // ------------------------------------------------------------ хук
 
+    /// <summary>
+    /// Колбэк хука. Обязан вернуться за микросекунды: только фильтры, проверка горячих
+    /// клавиш (несколько сравнений) и постановка нажатия в очередь.
+    /// </summary>
     private void OnKeyEvent(object? sender, KeyboardHookEventArgs e)
     {
-        if (e.IsInjected || e.IsOurEvent)
+        if (e.IsOurEvent)
+            return;
+
+        // Ввод, сгенерированный другой программой, по умолчанию игнорируем: так мы не
+        // реагируем на чужую автоматизацию и на собственные события. Для автотестов
+        // (keybd_event/SendInput из стенда) фильтр снимается переменной окружения.
+        if (e.IsInjected && !AllowInjectedInput)
             return;
 
         try
@@ -204,28 +274,115 @@ public sealed class AutoSwitchService : IDisposable
             }
 
             if (e.IsKeyDown)
-                OnKeyDown(e);
-            else
-                OnKeyUp(e);
+            {
+                if (_pauseHotkey is not null &&
+                    _pauseHotkey.Matches(e.VirtualKey, e.Ctrl, e.Alt, e.Shift, e.Win))
+                {
+                    e.Handled = true;
+                    Enqueue(KeyWorkItem.Hotkey(KeyWorkKind.PauseHotkey));
+                    return;
+                }
+
+                if (_manualHotkey is not null &&
+                    _manualHotkey.Matches(e.VirtualKey, e.Ctrl, e.Alt, e.Shift, e.Win))
+                {
+                    e.Handled = true;
+                    Enqueue(KeyWorkItem.Hotkey(KeyWorkKind.ManualHotkey));
+                    return;
+                }
+
+                // Enter и Tab перехватываем только когда в буфере есть слово: иначе они
+                // сработают в чужом окне раньше, чем мы успеем исправить предыдущее.
+                if (_hasPendingWord &&
+                    e.VirtualKey is KeyClassifier.VkReturn or KeyClassifier.VkTab)
+                {
+                    e.Handled = true;
+                    Enqueue(FromEvent(e, swallowed: true));
+                    return;
+                }
+            }
+
+            Enqueue(FromEvent(e, swallowed: false));
         }
         catch (Exception ex)
         {
-            _logger.Error("Ошибка обработки нажатия", ex);
+            _logger.Error("Ошибка постановки нажатия в очередь", ex);
         }
     }
 
-    private void OnKeyDown(KeyboardHookEventArgs e)
+    private void Enqueue(KeyWorkItem item)
+    {
+        try
+        {
+            _keys.Add(item);
+        }
+        catch (InvalidOperationException)
+        {
+            // Очередь закрыта — приложение завершается.
+        }
+    }
+
+    private void WorkerLoop()
+    {
+        try
+        {
+            foreach (var item in _keys.GetConsumingEnumerable())
+            {
+                try
+                {
+                    ProcessKey(item);
+                }
+                catch (Exception ex)
+                {
+                    _logger.Error("Ошибка обработки нажатия", ex);
+                }
+            }
+        }
+        catch (ObjectDisposedException)
+        {
+            // Нормальное завершение.
+        }
+        catch (Exception ex)
+        {
+            _logger.Error("Поток обработки нажатий упал", ex);
+        }
+    }
+
+    private void ProcessKey(KeyWorkItem item)
+    {
+        switch (item.Kind)
+        {
+            case KeyWorkKind.PauseHotkey:
+                ToggleEnabled();
+                return;
+
+            case KeyWorkKind.ManualHotkey:
+                RequestManualConvert();
+                return;
+        }
+
+        if (!_started || _disposed)
+            return;
+
+        // Символ и раскладка разрешаются здесь, в рабочем потоке: в колбэке хука на это
+        // нет времени (GetGUIThreadInfo/GetKeyboardLayout/ToUnicodeEx — вызовы Win32).
+        if (item.Kind == KeyWorkKind.Key && item.IsKeyDown)
+        {
+            char? resolved = _text.Resolve(
+                item.VirtualKey, item.ScanCode, item.Shift, item.Ctrl, item.Alt, item.Win,
+                item.CapsLock, out string layoutId);
+            item = item with { Character = resolved, LayoutId = layoutId };
+        }
+
+        if (item.IsKeyDown)
+            OnKeyDownCore(item);
+        else
+            OnKeyUpCore(item);
+    }
+
+    private void OnKeyDownCore(KeyWorkItem e)
     {
         int vk = e.VirtualKey;
-
-        // 1. Горячие клавиши обрабатываются до всех проверок режимов: пауза должна
-        //    работать и в исключённом приложении, иначе из неё не выбраться.
-        if (_pauseHotkey is not null && _pauseHotkey.Matches(vk, e.Ctrl, e.Alt, e.Shift, e.Win))
-        {
-            e.Handled = true;
-            ToggleEnabled();
-            return;
-        }
 
         if (vk is VkLShift or VkRShift)
         {
@@ -243,15 +400,7 @@ public sealed class AutoSwitchService : IDisposable
 
         if (vk == KeyClassifier.VkPause && _settings.PauseHotkeyEnabled)
         {
-            e.Handled = true;
             HandlePause();
-            return;
-        }
-
-        if (_manualHotkey is not null && _manualHotkey.Matches(vk, e.Ctrl, e.Alt, e.Shift, e.Win))
-        {
-            e.Handled = true;
-            RequestManualConvert();
             return;
         }
 
@@ -282,6 +431,7 @@ public sealed class AutoSwitchService : IDisposable
                 if (_engine.Buffer.IsEmpty)
                     _engine.ClearUndo();
                 _engine.Backspace();
+                _hasPendingWord = !_engine.Buffer.IsEmpty;
                 return;
 
             case KeyRole.WordChar:
@@ -294,7 +444,7 @@ public sealed class AutoSwitchService : IDisposable
         }
     }
 
-    private void OnKeyUp(KeyboardHookEventArgs e)
+    private void OnKeyUpCore(KeyWorkItem e)
     {
         if (e.VirtualKey is not (VkLShift or VkRShift))
             return;
@@ -338,7 +488,7 @@ public sealed class AutoSwitchService : IDisposable
         }
     }
 
-    private void HandleWordChar(KeyboardHookEventArgs e, ForegroundWindowInfo info, bool auto)
+    private void HandleWordChar(KeyWorkItem e, ForegroundWindowInfo info, bool auto)
     {
         if (e.Character is not { } ch)
             return;
@@ -348,15 +498,17 @@ public sealed class AutoSwitchService : IDisposable
         {
             _passwordLike = true;
             _engine.Reset();
+            _hasPendingWord = false;
             return;
         }
 
         if (_passwordLike)
             return;
 
-        string layoutId = ResolveLayoutId(info);
+        string layoutId = e.LayoutId ?? ResolveLayoutId(info);
         var stroke = new KeyStroke(e.VirtualKey, e.Shift, e.CapsLock, e.ScanCode);
         _engine.AppendChar(stroke, ch, layoutId);
+        _hasPendingWord = !_engine.Buffer.IsEmpty;
 
         // Эвристика «похоже на пароль»: строчные + заглавные + цифры/знаки и длина > 6.
         // Такой ввод не исправляем и раскладку не трогаем — оставляем как набрано.
@@ -365,6 +517,7 @@ public sealed class AutoSwitchService : IDisposable
             _passwordLike = true;
             _engine.Reset();
             _engine.ClearUndo();
+            _hasPendingWord = false;
             _logger.Debug("Похоже на пароль — автопереключение для слова отключено.");
             return;
         }
@@ -376,22 +529,17 @@ public sealed class AutoSwitchService : IDisposable
         if (plan is null)
             return;
 
-        // Раннее переключение перехватывает текущую клавишу: иначе наши Backspace могут
-        // выполниться раньше, чем система доставит её в окно, и удалят лишний символ.
-        // Перехватили — значит на экране ещё нет последнего символа: DeleteCount на 1 меньше,
-        // а ReplacementText уже содержит его сконвертированным.
-        e.Handled = true;
-        var adjusted = plan.DeleteCount > 1
-            ? plan with { DeleteCount = plan.DeleteCount - 1 }
-            : plan;
-        _executor.ExecutePlan(adjusted, info.Handle);
+        // Клавишу перехватить уже нельзя (хук вернулся раньше), поэтому последний символ
+        // реально стоит в окне — DeleteCount движка его учитывает как есть.
+        _hasPendingWord = false;
+        _executor.ExecutePlan(plan, info.Handle, info.ProcessName);
         PlayFixSound();
     }
 
-    private void HandleTerminator(KeyboardHookEventArgs e, ForegroundWindowInfo info, bool auto)
+    private void HandleTerminator(KeyWorkItem e, ForegroundWindowInfo info, bool auto)
     {
         char? terminator = e.Character ?? DefaultTerminator(e.VirtualKey);
-        bool swallowed = e.VirtualKey is KeyClassifier.VkReturn or KeyClassifier.VkTab;
+        bool swallowed = e.Swallowed;
 
         // Enter/Tab перехватываем: иначе они сработают в чужом окне до того, как мы исправим слово.
         // Терминатор известен всегда: если клавишу проглотили — её напечатает executor, если она уже
@@ -399,14 +547,18 @@ public sealed class AutoSwitchService : IDisposable
         var result = _engine.CompleteWord(terminator, terminatorAlreadyTyped: !swallowed);
 
         _passwordLike = false;
+        _hasPendingWord = false;
 
         if (result.Plan is not { } plan || !auto)
+        {
+            // Нажатие перехвачено, но исправлять нечего — возвращаем Enter/Tab в окно,
+            // иначе он потеряется.
+            if (swallowed && terminator is { } typed)
+                _sender.SendTerminator(typed);
             return;
+        }
 
-        if (swallowed)
-            e.Handled = true;
-
-        _executor.ExecutePlan(plan, info.Handle);
+        _executor.ExecutePlan(plan, info.Handle, info.ProcessName);
         PlayFixSound();
     }
 
@@ -427,8 +579,8 @@ public sealed class AutoSwitchService : IDisposable
             return;
         }
 
-        IntPtr window = _tracker.Get().Handle;
-        _executor.ExecutePlan(plan, window);
+        var info = _tracker.Get();
+        _executor.ExecutePlan(plan, info.Handle, info.ProcessName);
         PlayFixSound();
     }
 
@@ -644,6 +796,7 @@ public sealed class AutoSwitchService : IDisposable
     {
         _engine.Reset();
         _passwordLike = false;
+        _hasPendingWord = false;
     }
 
     private static bool LooksLikePassword(string text)
@@ -669,6 +822,19 @@ public sealed class AutoSwitchService : IDisposable
         KeyClassifier.VkTab => '\t',
         _ => null
     };
+
+    private static KeyWorkItem FromEvent(KeyboardHookEventArgs e, bool swallowed) => new(
+        KeyWorkKind.Key,
+        e.VirtualKey,
+        e.ScanCode,
+        e.Character,
+        e.Shift,
+        e.Ctrl,
+        e.Alt,
+        e.Win,
+        e.CapsLock,
+        e.IsKeyDown,
+        swallowed);
 
     private static KeyReplayItem ToReplayItem(KeyboardHookEventArgs e) => new(
         e.VirtualKey,
@@ -717,5 +883,19 @@ public sealed class AutoSwitchService : IDisposable
         }
 
         _singleShiftTimer.Dispose();
+
+        try
+        {
+            _keys.CompleteAdding();
+        }
+        catch (ObjectDisposedException)
+        {
+            // Очередь уже закрыта.
+        }
+
+        if (!_worker.Join(TimeSpan.FromSeconds(2)))
+            _logger.Warn("Поток обработки нажатий не завершился за 2 с");
+
+        _keys.Dispose();
     }
 }

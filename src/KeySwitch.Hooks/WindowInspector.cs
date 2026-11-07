@@ -51,6 +51,12 @@ public sealed class WindowInspector
     public ForegroundWindowInfo GetForeground() =>
         TryGetForeground(out var info) ? info : Empty;
 
+    /// <summary>
+    /// HWND активного окна без разбора процесса. Вызов стоит доли микросекунды —
+    /// им пользуется кэш, чтобы понять, что фокус всё ещё в том же окне.
+    /// </summary>
+    public static IntPtr GetForegroundHandle() => NativeMethods.GetForegroundWindow();
+
     /// <summary>Пытается получить снимок окна переднего плана.</summary>
     public bool TryGetForeground(out ForegroundWindowInfo info)
     {

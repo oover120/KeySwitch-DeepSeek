@@ -281,3 +281,52 @@
 сборка игнорирует синтетический ввод по замыслу, а физической клавиатуры у стенда нет. Поэтому
 живой набор в Chrome человеком — единственная проверка, которую нужно сделать руками.
 
+
+## Этап 13. Обработка нажатий в рабочем потоке, журнал исправления, раскладка по фокусу
+
+**Задача.** По отчёту пользователя: в журнале видно верное решение детектора (Δ=6,23 при пороге 0,88,
+режим Full), но после строки «terminator» ничего нет — шаг исправления либо не выполнялся, либо
+падал молча. Требовалось: журнал исправления уровня INFO, колбэк хука за единицы миллисекунд,
+кэш окна фокуса с прогревом по `EVENT_SYSTEM_FOREGROUND`, порядок «пробел → Backspace × (длина+1) →
+раскладка → слово и пробел», пауза 10–15 мс для браузеров/Electron, повтор `SendInput` при
+неполной доставке.
+
+**Сделано.**
+- `src\KeySwitch.App\Services\AutoSwitchService.cs` — обработка нажатий вынесена в поток
+  `KeySwitch.KeyProcessor` через `BlockingCollection<KeyWorkItem>`; колбэк хука только фильтрует
+  и кладёт элемент в очередь.
+- `src\KeySwitch.App\Services\PlanExecutor.cs` — журнал исправления: старт (`proc`, `hwnd`,
+  `backspaces`, целевая раскладка, пауза, уверенность), результат каждого шага
+  (`отправлено/принято/ошибка`), смена раскладки (`before -> after ok=`), итоговое время;
+  исключения пишутся со стеком.
+- `src\KeySwitch.Hooks\InputSender.cs` — `SendResult(Sent, Inserted, LastError)`, повтор одного
+  непринятого хвоста, единый маркер `dwExtraInfo = 0x4B53_0001`.
+- `src\KeySwitch.App\Services\CorrectionPacing.cs` — пауза 12 мс между стиранием и вводом для
+  Chrome/Edge/Firefox/Electron (список процессов).
+- `src\KeySwitch.Hooks\ForegroundWatcher.cs` — `SetWinEventHook(EVENT_SYSTEM_FOREGROUND)`,
+  прогревает кэш окна и UI Automation при смене фокуса, а не на первом нажатии.
+- `src\KeySwitch.Hooks\KeyTextResolver.cs` — символ и раскладка по потоку фокуса
+  (`GetGUIThreadInfo` → `hwndFocus` → `GetKeyboardLayout`); в колбэке хука Win32 больше нет.
+- `src\KeySwitch.Hooks\KeyboardHook.cs` — замер длительности колбэка, предупреждение при ≥ 20 мс.
+- `src\KeySwitch.Hooks\UiAutomationProbe.cs` — таймаут проверки пароля 50 мс.
+
+**Проверка.** `dotnet build KeySwitch.sln -c Release` — 0 ошибок / 0 предупреждений;
+`dotnet test` — **376/376**; `publish.ps1 -SkipTests` → `artifacts\publish\KeySwitch.exe`
+150 862 882 б; смоук — WS 109 МБ / Private 114 МБ, 20 потоков, рост за 3 с отсутствует.
+
+**Стенд на живом Chrome** (до правки раскладки по фокусу, `KEYSWITCH_ALLOW_INJECTED=1`):
+`PROBE work vk=71 ch=103 layout=en-US` … → `Исправление: старт proc=chrome hwnd=0x660A2A
+backspaces=7 target=ru-RU layout_before=en-US pause=12мс conf=1,00` →
+`Backspace отправлено=14 принято=14 ошибка=0` → `раскладка en-US -> ru-RU ok=True` →
+`ввод отправлено=14 принято=14 ошибка=0` → `завершено за 42 мс`.
+
+**Найдено стендом на Блокноте.** Приложение считало символ по раскладке окна переднего плана:
+в WinUI3 фокус живёт в другом потоке, окно рапортовало `ru-RU`, а печаталось латиницей —
+буфер собирался как «привет», детектор видел валидное слово и молчал. Отсюда `KeyTextResolver`
+и D029.
+
+**Не сделано.** Живой прогон двух тестов (Блокнот и Chrome) с показом журнала: на машине
+в полноэкранном режиме работает Dota 2 и держит фокус, а синтетический ввод уводит пользователя
+из игры. Тесты запускаются одной командой, как только игра закрыта:
+`powershell -NoProfile -ExecutionPolicy Bypass -File tools\probe\run-ks.ps1 -Target notepad`
+и `-Target chrome`.

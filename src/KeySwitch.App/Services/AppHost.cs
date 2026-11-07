@@ -37,6 +37,7 @@ public sealed class AppHost : IDisposable
     private readonly LayoutSwitcher _layouts;
     private readonly ClipboardHelper _clipboard;
     private readonly ForegroundTracker _tracker;
+    private readonly ForegroundWatcher _foreground;
     private readonly PlanExecutor _executor;
     private readonly SoundService _sound;
     private readonly AutoSwitchService _autoSwitch;
@@ -98,6 +99,14 @@ public sealed class AppHost : IDisposable
         _executor = new PlanExecutor(_sender, _layouts, _logger);
         _sound = new SoundService(_logger);
         _sound.SetVolume(_settings.SoundVolume);
+
+        // Хук сообщает о собственных задержках: медленный колбэк Windows может снять.
+        _hook.Diagnostics = _logger.Warn;
+
+        // Смена активного окна прогревает кэш (процесс, раскладка, проверка пароля)
+        // заранее — к первому нажатию всё уже готово, а хук ничего не вычисляет.
+        _foreground = new ForegroundWatcher();
+        _foreground.ForegroundChanged += OnForegroundChanged;
 
         _autoSwitch = new AutoSwitchService(
             _settings,
@@ -215,6 +224,7 @@ public sealed class AppHost : IDisposable
 
         try
         {
+            _foreground.Start();
             _autoSwitch.Start();
         }
         catch (Exception ex)
@@ -225,6 +235,22 @@ public sealed class AppHost : IDisposable
                 "Не удалось запустить перехват клавиатуры. Автопереключение недоступно, " +
                 "настройки и трей работают.",
                 TrayBalloonIcon.Error);
+        }
+    }
+
+    /// <summary>
+    /// Сменилось активное окно: кэш процесса, раскладки и проверки пароля прогревается
+    /// заранее, чтобы первое нажатие не тратило на это время.
+    /// </summary>
+    private void OnForegroundChanged(IntPtr handle)
+    {
+        try
+        {
+            _tracker.OnForegroundChanged(handle);
+        }
+        catch (Exception ex)
+        {
+            _logger.Debug($"OnForegroundChanged: {ex.Message}");
         }
     }
 
@@ -330,6 +356,15 @@ public sealed class AppHost : IDisposable
         try
         {
             _tray.Dispose();
+        }
+        catch (Exception)
+        {
+            // ignore
+        }
+
+        try
+        {
+            _foreground.Dispose();
         }
         catch (Exception)
         {
