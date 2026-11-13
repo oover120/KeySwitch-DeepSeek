@@ -1,5 +1,6 @@
-# Печатает ответ для git credential: логин или токен.
-# Токен читается напрямую из Windows Credential Manager и никогда не попадает в файл.
+# Prints the git credential answer: login or token.
+# The token is read straight from Windows Credential Manager and never lands in a file.
+# ASCII-only on purpose: Windows PowerShell 5.1 reads UTF-8 without BOM as ANSI.
 param([string]$Prompt)
 
 Add-Type -TypeDefinition @"

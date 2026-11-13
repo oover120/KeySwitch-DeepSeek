@@ -1,4 +1,6 @@
-# Создаёт релиз и загружает в него exe. Токен читается из Credential Manager.
+# Creates a GitHub release and uploads the exe into it.
+# The token is read from Credential Manager and never printed.
+# ASCII-only on purpose: Windows PowerShell 5.1 reads UTF-8 without BOM as ANSI.
 param(
     [Parameter(Mandatory = $true)][string]$Tag,
     [Parameter(Mandatory = $true)][string]$Name,

@@ -1,6 +1,8 @@
-# Сохраняет новый токен GitHub в Windows Credential Manager.
-# Запускать в своём терминале: токен вводится скрыто и никуда не печатается.
+# Saves a new GitHub token into Windows Credential Manager.
+# Run in your own terminal; the token is typed hidden and never printed.
 #   powershell -NoProfile -ExecutionPolicy Bypass -File tools\gh_set_token.ps1
+# NOTE: this file is intentionally ASCII-only: Windows PowerShell 5.1 reads
+# UTF-8 without BOM as ANSI and would break on Cyrillic text.
 $ErrorActionPreference = 'Stop'
 
 Add-Type -TypeDefinition @"
@@ -23,7 +25,7 @@ public static class CredWriteApi {
 $target = 'GitHub - https://api.github.com/oover120'
 $user = 'oover120'
 
-Write-Host 'Вставьте новый токен GitHub (ввод скрыт), Enter — сохранить:' -ForegroundColor Cyan
+Write-Host 'Paste the new GitHub token (input is hidden), Enter to save:' -ForegroundColor Cyan
 $secure = Read-Host -AsSecureString
 $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
 try {
@@ -33,36 +35,40 @@ finally {
     [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
 }
 
-if ([string]::IsNullOrWhiteSpace($token)) { Write-Host 'Пусто — ничего не сохранено.' -ForegroundColor Yellow; exit 1 }
+if ([string]::IsNullOrWhiteSpace($token)) {
+    Write-Host 'Empty input - nothing saved.' -ForegroundColor Yellow
+    exit 1
+}
 
 $bytes = [Text.Encoding]::UTF8.GetBytes($token)
 $blob = [Runtime.InteropServices.Marshal]::AllocHGlobal($bytes.Length)
 try {
     [Runtime.InteropServices.Marshal]::Copy($bytes, 0, $blob, $bytes.Length)
     $cred = New-Object CredWriteApi+CREDENTIAL
-    $cred.Type = 1                 # CRED_TYPE_GENERIC
+    $cred.Type = 1
     $cred.TargetName = $target
     $cred.UserName = $user
-    $cred.Comment = 'KeySwitch DeepSeek: публикация релизов'
+    $cred.Comment = 'KeySwitch DeepSeek: release publishing'
     $cred.CredentialBlob = $blob
     $cred.CredentialBlobSize = $bytes.Length
-    $cred.Persist = 2              # CRED_PERSIST_LOCAL_MACHINE
+    $cred.Persist = 2
 
     if (-not [CredWriteApi]::CredWrite([ref]$cred, 0)) {
-        throw "CredWrite: $([ComponentModel.Win32Exception]::new([Runtime.InteropServices.Marshal]::GetLastWin32Error()).Message)"
+        throw "CredWrite failed: $([ComponentModel.Win32Exception]::new([Runtime.InteropServices.Marshal]::GetLastWin32Error()).Message)"
     }
 }
 finally {
     [Runtime.InteropServices.Marshal]::ZeroFreeGlobalAllocUnicode($blob)
 }
 
-Write-Host 'Токен сохранён. Проверяю доступ к GitHub…' -ForegroundColor Cyan
+Write-Host 'Token saved. Checking GitHub access...' -ForegroundColor Cyan
 try {
-    $resp = Invoke-WebRequest -Uri 'https://api.github.com/user' -Headers @{ Authorization = "Bearer $token"; 'User-Agent' = 'KeySwitchDeepSeek' } -UseBasicParsing
+    $resp = Invoke-WebRequest -Uri 'https://api.github.com/user' `
+        -Headers @{ Authorization = "Bearer $token"; 'User-Agent' = 'KeySwitchDeepSeek' } -UseBasicParsing
     $scopes = $resp.Headers['x-oauth-scopes']
     $login = ($resp.Content | ConvertFrom-Json).login
-    Write-Host "OK: вход как $login, права: $scopes" -ForegroundColor Green
+    Write-Host "OK: logged in as $login, scopes: $scopes" -ForegroundColor Green
 }
 catch {
-    Write-Host "Токен сохранён, но GitHub ответил ошибкой: $($_.Exception.Message)" -ForegroundColor Yellow
+    Write-Host "Token saved, but GitHub returned an error: $($_.Exception.Message)" -ForegroundColor Yellow
 }

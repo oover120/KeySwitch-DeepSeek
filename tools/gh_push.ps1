@@ -1,5 +1,6 @@
-# Push в GitHub без интерактивного GCM.
-# Токен не хранится ни в одном файле: askpass-обёртка читает его из Credential Manager.
+# Push to GitHub without the interactive GCM.
+# The token is never stored in any file: the askpass wrapper reads it from Credential Manager.
+# ASCII-only on purpose: Windows PowerShell 5.1 reads UTF-8 without BOM as ANSI.
 $ErrorActionPreference = 'Stop'
 $askpass = Join-Path $env:TEMP ('ks_askpass_' + [guid]::NewGuid().ToString('N') + '.cmd')
 $helper = Join-Path $PSScriptRoot 'gh_askpass.ps1'
