@@ -223,9 +223,10 @@ public class DetectorTests
     [Fact]
     public void TooShortWord_IsKept()
     {
+        // Одиночная буква проверяется отдельным правилом: «g» → «п», а «п» — не слово.
         var result = Detector.Decide("g", TestEnvironment.En);
         Assert.False(result.Convert);
-        Assert.Equal("слово слишком короткое", result.Reason);
+        Assert.Equal("нет однобуквенного слова в целевой раскладке", result.Reason);
 
         var withDigit = Detector.Decide("g1", TestEnvironment.En);
         Assert.False(withDigit.Convert);

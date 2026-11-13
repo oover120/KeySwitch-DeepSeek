@@ -265,7 +265,11 @@ public sealed class CorrectionEngine
             return null;
 
         var text = token.Text;
-        if (CountLetters(text) < _settings.MinWordLength)
+        var letterCount = CountLetters(text);
+
+        // Одиночную букву проверяет отдельное правило детектора («b» → «и»), поэтому общий
+        // порог минимальной длины к ней не применяется.
+        if (letterCount != 1 && letterCount < _settings.MinWordLength)
             return null;
 
         var target = _detector.Pairs.GetAlternate(source);

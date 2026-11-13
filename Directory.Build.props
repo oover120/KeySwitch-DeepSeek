@@ -4,7 +4,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <InvariantGlobalization>false</InvariantGlobalization>
-    <Version>1.2.1</Version>
+    <Version>1.2.2</Version>
     <Company>oover120</Company>
     <Product>KeySwitch DeepSeek</Product>
     <NeutralLanguage>ru-RU</NeutralLanguage>

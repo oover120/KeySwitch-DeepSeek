@@ -171,6 +171,11 @@ public class DataTests
 
         var kept = detector.Decide("привет", LayoutCatalog.RuRu);
         Assert.False(kept.Convert);
+
+        // Одиночная буква в реальных словарях: «привет малыш b карлсон».
+        var single = detector.Decide("b", LayoutCatalog.EnUs);
+        Assert.True(single.Convert);
+        Assert.Equal("и", single.ConvertedText);
     }
 
     private static readonly Lazy<LanguageResources?> SharedAssets = new(() =>

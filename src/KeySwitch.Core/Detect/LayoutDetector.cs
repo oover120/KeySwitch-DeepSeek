@@ -15,6 +15,16 @@ public sealed class LayoutDetector
     private readonly DetectionSettings _settings;
     private readonly Dictionary<string, LanguageScorer> _scorers = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Однобуквенные слова языка. Нужны для правила одиночных букв: «b» в русской раскладке —
+    /// это «и», «c» — «с», но одиночная «a» (артикль) и «i» остаются как набраны.
+    /// </summary>
+    private static readonly Dictionary<string, HashSet<char>> OneLetterWords = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["ru"] = new HashSet<char> { 'а', 'в', 'и', 'к', 'о', 'с', 'у', 'я' },
+        ["en"] = new HashSet<char> { 'a', 'i' },
+    };
+
     public LayoutDetector(ILanguageResourcesProvider resources, LayoutPairRegistry pairs, DetectionSettings settings)
     {
         _resources = resources;
@@ -38,6 +48,8 @@ public sealed class LayoutDetector
     public DetectionResult Decide(string text, LayoutTable source, LayoutTable target, bool early)
     {
         var letterCount = CountLetters(text);
+        if (letterCount == 1)
+            return DecideSingleLetter(text, source, target);
         if (letterCount < _settings.MinWordLength)
             return DetectionResult.Keep(text, source.Id, "слово слишком короткое");
 
@@ -107,8 +119,8 @@ public sealed class LayoutDetector
         if (target == null)
             return DetectionResult.Keep(text, source.Id, "нет пары раскладок");
 
-        if (CountLetters(text) < _settings.MinWordLength)
-            return DetectionResult.Keep(text, source.Id, "слово слишком короткое");
+        if (CountLetters(text) == 0)
+            return DetectionResult.Keep(text, source.Id, "нет букв для конвертации");
 
         var fullText = LayoutConverter.Convert(text, source, target);
         if (string.Equals(fullText, text, StringComparison.Ordinal))
@@ -132,6 +144,39 @@ public sealed class LayoutDetector
         var (candidateText, candidateScore, interpretation) = ChooseCandidate(fullText, fullScore, coreText, coreScore, tail);
         return new DetectionResult(true, 1.0, source.Id, target.Id, text, candidateText,
             $"принудительно ({interpretation})", 0, candidateScore.Total, false, candidateScore.InDictionary);
+    }
+
+    /// <summary>
+    /// Одиночная буква. Словарных оценок здесь нет — слово из одного символа слишком короткое
+    /// для n-грамм, поэтому правило узкое и явное: конвертируем, только если исходная буква
+    /// не является однобуквенным словом своего языка, а результат конвертации — однобуквенное
+    /// слово целевого. Так «b» превращается в «и», а «a» и «i» остаются как набраны.
+    /// </summary>
+    private DetectionResult DecideSingleLetter(string text, LayoutTable source, LayoutTable target)
+    {
+        if (text.Length != 1 || !char.IsLetter(text[0]))
+            return DetectionResult.Keep(text, source.Id, "слово слишком короткое");
+
+        var letter = char.ToLowerInvariant(text[0]);
+        if (IsOneLetterWord(source.Language, letter))
+            return DetectionResult.Keep(text, source.Id, "однобуквенное слово исходного языка");
+
+        var converted = LayoutConverter.Convert(text, source, target);
+        if (converted.Length != 1 || !char.IsLetter(converted[0]))
+            return DetectionResult.Keep(text, source.Id, "символ не конвертируется в букву");
+
+        var convertedLetter = char.ToLowerInvariant(converted[0]);
+        if (!IsOneLetterWord(target.Language, convertedLetter))
+            return DetectionResult.Keep(text, source.Id, "нет однобуквенного слова в целевой раскладке");
+
+        return new DetectionResult(true, 1.0, source.Id, target.Id, text, converted,
+            $"однобуквенное слово: {letter} → {convertedLetter}", 0, 0, false, true);
+    }
+
+    private static bool IsOneLetterWord(string language, char letter)
+    {
+        var key = language.Length >= 2 ? language[..2] : language;
+        return OneLetterWords.TryGetValue(key, out var set) && set.Contains(letter);
     }
 
     private static (string Text, WordScore Score, string Interpretation) ChooseCandidate(

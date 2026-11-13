@@ -1,6 +1,6 @@
 # Diagnostic bench: real target app + real KeySwitch + injected key events.
 # Scenario: the window is in EN layout and the user types a Russian word on it
-# ("ghbdtn " -> "привет "). Prints what the field got and the KeySwitch log.
+# ("ghbdtn " -> Russian "privet "). Prints what the field got and the KeySwitch log.
 #
 # Usage:
 #   powershell -NoProfile -ExecutionPolicy Bypass -File tools\probe\run-ks.ps1 -Target notepad
@@ -9,7 +9,7 @@
 # ASCII only: Windows PowerShell 5.1 reads UTF-8 without BOM as ANSI.
 param(
     [Parameter(Mandatory = $true)][ValidateSet('notepad', 'chrome')][string]$Target,
-    [ValidateSet('auto', 'force')][string]$Scenario = 'auto'
+    [ValidateSet('auto', 'force', 'single')][string]$Scenario = 'auto'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -267,6 +267,25 @@ if ($Scenario -eq 'force') {
         [W]::keybd_event(0xA0, 0, 2, [UIntPtr]::Zero)
         Start-Sleep -Milliseconds 90
     }
+    Start-Sleep -Milliseconds 1200
+}
+elseif ($Scenario -eq 'single') {
+    # Russian words around one letter typed in EN layout.
+    Write-Output '--- INPUT: privet malysh + b (EN) + space + karlson ---'
+    [void][W]::SetLayout($hwnd, '00000419')
+    Start-Sleep -Milliseconds 250
+    foreach ($vk in @(0x47, 0x48, 0x42, 0x44, 0x54, 0x4E, 0x20)) { Send-Key $vk }
+    Start-Sleep -Milliseconds 150
+    foreach ($vk in @(0x56, 0x46, 0x4B, 0x53, 0x49, 0x20)) { Send-Key $vk }
+    Start-Sleep -Milliseconds 300
+    [void][W]::SetLayout($hwnd, '00000409')
+    Start-Sleep -Milliseconds 250
+    Send-Key 0x42
+    Start-Sleep -Milliseconds 120
+    Send-Key 0x20
+    Start-Sleep -Milliseconds 900
+    # Do not force the layout here: if the app switched it, the next word is typed in RU.
+    foreach ($vk in @(0x52, 0x46, 0x48, 0x4B, 0x43, 0x4A, 0x59, 0x20)) { Send-Key $vk }
     Start-Sleep -Milliseconds 1200
 }
 else {

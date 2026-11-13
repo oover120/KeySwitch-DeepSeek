@@ -95,18 +95,33 @@ public class ForceConvertTests
     }
 
     [Fact]
-    public void ForceConvert_TooShort_ReturnsNoPlan()
+    public void ForceConvert_ShortWord_IgnoresMinimumLength()
     {
         var settings = TestEnvironment.DefaultSettings();
         settings.MinWordLength = 4;
         var engine = CreateEngine(settings);
 
+        // Пользователь нажал двойной Shift осознанно — минимальная длина не помеха.
         Type(engine, "abc", LayoutCatalog.EnUsId);
         var forced = engine.ForceConvert();
 
-        Assert.False(forced.HasPlan);
-        Assert.Equal("конвертация не требуется", forced.Note);
-        Assert.False(engine.CanUndo);
+        Assert.True(forced.HasPlan);
+        Assert.Equal("фис", forced.Plan!.ReplacementText);
+        Assert.Equal(3, forced.Plan.DeleteCount);
+        Assert.True(engine.CanUndo);
+    }
+
+    [Fact]
+    public void ForceConvert_SingleLetter_ConvertsAnyway()
+    {
+        var engine = CreateEngine();
+
+        Type(engine, "b", LayoutCatalog.EnUsId);
+        var forced = engine.ForceConvert();
+
+        Assert.True(forced.HasPlan);
+        Assert.Equal("и", forced.Plan!.ReplacementText);
+        Assert.Equal(1, forced.Plan.DeleteCount);
     }
 
     [Fact]
@@ -157,7 +172,7 @@ public class ForceConvertTests
     }
 
     [Fact]
-    public void Detector_ForceConvert_IgnoresThresholdButRespectsMinLength()
+    public void Detector_ForceConvert_IgnoresThresholdAndMinimumLength()
     {
         var settings = TestEnvironment.DefaultSettings();
         settings.MinWordLength = 4;
@@ -174,7 +189,8 @@ public class ForceConvertTests
         Assert.Equal(LayoutCatalog.RuRuId, forced.TargetLayoutId);
 
         var shortWord = detector.ForceConvert("ab", en);
-        Assert.False(shortWord.Convert);
+        Assert.True(shortWord.Convert);
+        Assert.Equal("фи", shortWord.ConvertedText);
 
         // Обратное направление тоже работает.
         var back = detector.ForceConvert("руддщ", ru);
