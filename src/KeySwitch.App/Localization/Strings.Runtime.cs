@@ -40,6 +40,9 @@ internal static class RuntimeStrings
         ["balloon.admin.elevation_required"] =
             "Для запуска с правами администратора приложение нужно один раз запустить " +
             "от имени администратора и включить галочку заново.",
+        ["balloon.admin.not_elevated"] =
+            "Включено «Запускать от администратора», но приложение запущено без прав. " +
+            "Снимите и снова поставьте галочку — Windows перезапустит его с повышением.",
         ["balloon.uipi.text"] =
             "Активное окно запущено с правами администратора. Из-за защиты Windows (UIPI) " +
             "автопереключение в нём не работает.",
@@ -81,6 +84,9 @@ internal static class RuntimeStrings
         ["balloon.admin.title"] = "Run as administrator",
         ["balloon.admin.elevation_required"] =
             "To run as administrator, start the app elevated once and tick the box again.",
+        ["balloon.admin.not_elevated"] =
+            "Run as administrator is enabled, but the app started without elevation. " +
+            "Untick and tick the box again — Windows will restart it elevated.",
         ["balloon.uipi.text"] =
             "The active window is running as administrator. Windows UIPI blocks " +
             "autoswitch in it.",

@@ -77,6 +77,43 @@ public static class ElevationHelper
         }
     }
 
+    // ------------------------------------------------------------ перезапуск
+
+    /// <summary>
+    /// Перезапускает приложение с повышенными правами (запрос UAC).
+    /// false — пользователь отказался в запросе UAC или запуск не удался.
+    /// </summary>
+    public static bool RestartElevated(string arguments = "")
+    {
+        string path = ExecutablePath();
+        if (path.Length == 0)
+            return false;
+
+        try
+        {
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = path,
+                Arguments = arguments,
+                UseShellExecute = true,
+                Verb = "runas",
+                WorkingDirectory = Path.GetDirectoryName(path) ?? string.Empty
+            };
+
+            using Process? process = Process.Start(startInfo);
+            return process is not null;
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            // 1223 (ERROR_CANCELLED) — пользователь нажал «Нет» в запросе UAC.
+            return false;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
     // ------------------------------------------------------------ HKCU Run
 
     /// <summary>Есть ли значение "KeySwitchDeepSeek" в HKCU\...\Run.</summary>

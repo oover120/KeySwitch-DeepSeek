@@ -121,8 +121,10 @@ Settings, exceptions, learning counters and logs live in `%APPDATA%\KeySwitchDee
 - **Memory**: about 108 MB at idle, ~190 MB after the settings window was opened once (WPF loads
   Direct3D and does not give it back). The target was 80 MB; the reason and the measurements are
   in `DECISIONS.md` (D023). If you need it lower, the settings UI can be moved out of the idle path.
-- **Elevated windows**: without administrator rights the hook cannot see keystrokes in elevated
-  apps (UIPI). The tray shows a warning; the "run as administrator" option registers a scheduled task.
+- **Elevated windows**: without administrator rights Windows does not deliver keystrokes to
+  elevated apps (UIPI). The "run as administrator" option restarts the app with a UAC prompt and
+  registers a scheduled task that starts it elevated at logon; while an elevated window is active
+  and the app is not elevated, the tray shows a warning.
 - **RDP and virtual machines**: layout switching inside a remote session is unreliable.
 - **Umlauts and non-RU/EN layouts**: only US English and Russian (ЙЦУКЕН) are modelled.
 - **Lowercase abbreviations and code**: `cfg`, `id`, `x` look like words in both layouts; the

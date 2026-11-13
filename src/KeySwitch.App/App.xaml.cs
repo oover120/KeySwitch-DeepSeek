@@ -28,8 +28,15 @@ public partial class App : Application
         base.OnStartup(e);
 
         // Один экземпляр на сессию/машину. Второй запуск просто активирует первый.
+        // Исключение — перезапуск с повышением прав (--takeover): он забирает управление,
+        // иначе админский процесс молча выходил бы, а обычный продолжал работать без прав.
         _singleInstance = new SingleInstance();
-        if (!_singleInstance.TryAcquire())
+        bool takeover = e.Args.Any(
+            arg => string.Equals(arg, "--takeover", StringComparison.OrdinalIgnoreCase));
+
+        if (takeover
+                ? !_singleInstance.TryAcquireWithTakeover(TimeSpan.FromSeconds(10))
+                : !_singleInstance.TryAcquire())
         {
             SingleInstance.SignalExistingInstance();
             Shutdown();
@@ -37,6 +44,7 @@ public partial class App : Application
         }
 
         _singleInstance.ActivationRequested += OnActivationRequested;
+        _singleInstance.TakeoverRequested += OnTakeoverRequested;
         _singleInstance.StartListening();
 
         AppPaths paths;
@@ -123,6 +131,19 @@ public partial class App : Application
         // Событие приходит из пула потоков — окно можно открывать только из UI-потока.
         Dispatcher.BeginInvoke(
             new Action(() => _host?.OpenSettings()),
+            DispatcherPriority.Normal);
+    }
+
+    private void OnTakeoverRequested(object? sender, EventArgs e)
+    {
+        // Запускается повышенный экземпляр: освобождаем мьютекс и завершаемся,
+        // чтобы он занял наше место (иначе осталась бы копия без прав).
+        Dispatcher.BeginInvoke(
+            new Action(() =>
+            {
+                _logger?.Info("Управление передаётся перезапущенному экземпляру.");
+                Shutdown();
+            }),
             DispatcherPriority.Normal);
     }
 

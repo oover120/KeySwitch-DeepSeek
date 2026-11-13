@@ -11,6 +11,7 @@ internal sealed class SingleInstance : IDisposable
 {
     private const string BaseMutexName = @"KeySwitchDeepSeek.SingleInstance.{0}";
     private const string BaseEventName = @"KeySwitchDeepSeek.Activate.{0}";
+    private const string BaseTakeoverName = @"KeySwitchDeepSeek.Takeover.{0}";
 
     // Global\ даёт единственный экземпляр на всю машину, но создание объекта в глобальном
     // пространстве имён требует SeCreateGlobalPrivilege. У обычного пользователя его нет,
@@ -19,11 +20,20 @@ internal sealed class SingleInstance : IDisposable
 
     private Mutex? _mutex;
     private EventWaitHandle? _activateEvent;
+    private EventWaitHandle? _takeoverEvent;
     private RegisteredWaitHandle? _registeredWait;
+    private RegisteredWaitHandle? _registeredTakeoverWait;
     private bool _disposed;
 
     /// <summary>Запрошена активация (пользователь запустил второй экземпляр).</summary>
     public event EventHandler? ActivationRequested;
+
+    /// <summary>
+    /// Запрошена передача управления: запускается повышенный экземпляр, и текущему
+    /// нужно освободить мьютекс и завершиться. Иначе «Запуск от имени администратора»
+    /// приводил бы к тому, что админский процесс молча выходит, а старый остаётся.
+    /// </summary>
+    public event EventHandler? TakeoverRequested;
 
     /// <summary>Захватывает мьютекс. false — экземпляр уже запущен.</summary>
     public bool TryAcquire()
@@ -46,6 +56,7 @@ internal sealed class SingleInstance : IDisposable
 
                     _mutex = mutex;
                     CreateActivationEvent(global);
+                    CreateTakeoverEvent(global);
                     return true;
                 }
                 catch (UnauthorizedAccessException)
@@ -68,25 +79,63 @@ internal sealed class SingleInstance : IDisposable
     /// <summary>Начинает ожидание запроса активации от второго экземпляра.</summary>
     public void StartListening()
     {
-        if (_activateEvent == null)
-            return;
+        if (_activateEvent != null)
+        {
+            _registeredWait = ThreadPool.RegisterWaitForSingleObject(
+                _activateEvent,
+                (_, _) => ActivationRequested?.Invoke(this, EventArgs.Empty),
+                null,
+                Timeout.Infinite,
+                executeOnlyOnce: false);
+        }
 
-        _registeredWait = ThreadPool.RegisterWaitForSingleObject(
-            _activateEvent,
-            (_, _) => ActivationRequested?.Invoke(this, EventArgs.Empty),
-            null,
-            Timeout.Infinite,
-            executeOnlyOnce: false);
+        if (_takeoverEvent != null)
+        {
+            _registeredTakeoverWait = ThreadPool.RegisterWaitForSingleObject(
+                _takeoverEvent,
+                (_, _) => TakeoverRequested?.Invoke(this, EventArgs.Empty),
+                null,
+                Timeout.Infinite,
+                executeOnlyOnce: false);
+        }
     }
 
-    /// <summary>Второй экземпляр: сигнализирует уже запущенному приложению.</summary>
-    public static void SignalExistingInstance()
+    /// <summary>
+    /// Захватывает мьютекс, при необходимости отобрав его у текущего экземпляра.
+    /// Используется только при перезапуске с повышением прав: новый процесс просит
+    /// старый завершиться и ждёт освобождения мьютекса.
+    /// </summary>
+    public bool TryAcquireWithTakeover(TimeSpan timeout)
+    {
+        if (TryAcquire())
+            return true;
+
+        SignalTakeover();
+
+        var deadline = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            Thread.Sleep(100);
+            if (TryAcquire())
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>Второй экземпляр: просит уже запущенный передать управление и завершиться.</summary>
+    public static void SignalTakeover()
+    {
+        Signal(BaseTakeoverName);
+    }
+
+    private static void Signal(string baseName)
     {
         foreach (var scope in Scopes)
         {
             foreach (var global in new[] { true, false })
             {
-                var name = string.Format(BaseEventName, global ? scope : "Session");
+                var name = string.Format(baseName, global ? scope : "Session");
                 try
                 {
                     if (EventWaitHandle.TryOpenExisting(name, out var handle))
@@ -105,6 +154,31 @@ internal sealed class SingleInstance : IDisposable
                 catch (Exception)
                 {
                 }
+            }
+        }
+    }
+
+    /// <summary>Второй экземпляр: сигнализирует уже запущенному приложению.</summary>
+    public static void SignalExistingInstance()
+    {
+        Signal(BaseEventName);
+    }
+
+    private void CreateTakeoverEvent(bool global)
+    {
+        foreach (var scope in Scopes)
+        {
+            var name = string.Format(BaseTakeoverName, global ? scope : "Session");
+            try
+            {
+                _takeoverEvent = new EventWaitHandle(false, EventResetMode.AutoReset, name);
+                return;
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+            catch (Exception)
+            {
             }
         }
     }
@@ -138,11 +212,15 @@ internal sealed class SingleInstance : IDisposable
         try
         {
             _registeredWait?.Unregister(null);
+            _registeredTakeoverWait?.Unregister(null);
         }
         catch
         {
             // ignore
         }
+
+        _takeoverEvent?.Dispose();
+        _takeoverEvent = null;
 
         _activateEvent?.Dispose();
         _activateEvent = null;

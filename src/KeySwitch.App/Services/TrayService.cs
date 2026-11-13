@@ -565,6 +565,17 @@ public sealed class TrayService : IDisposable
 
         if (!ok && target)
         {
+            // Задачу с RL HIGHEST из обычного процесса не создать. Перезапускаемся
+            // с запросом UAC: повышенный экземпляр заберёт мьютекс по --takeover
+            // и создаст задачу сам (AutostartService.Synchronize).
+            if (ElevationHelper.RestartElevated("--takeover"))
+            {
+                ExitRequested?.Invoke(this, EventArgs.Empty);
+                return;
+            }
+
+            // Пользователь отказался от UAC — не оставляем галочку, которая врёт.
+            _autostart.SetRunAsAdmin(false);
             ShowBalloon(
                 Loc.T("balloon.admin.title"),
                 Loc.T("balloon.admin.elevation_required"),
@@ -878,8 +889,24 @@ public sealed class TrayService : IDisposable
         return text.Length <= maxLength ? text : text[..maxLength];
     }
 
-    private void WarnAboutElevatedWindow(ForegroundWindowInfo info)
+    /// <summary>
+    /// Подсказка при старте: настройка «Запускать от администратора» включена, но процесс
+    /// запущен без прав — значит задача планировщика не создана и её не создать отсюда.
+    /// </summary>
+    public void ShowAdminRestartHint()
     {
+        if (_disposed)
+        {
+            return;
+        }
+
+        ShowBalloon(
+            Loc.T("balloon.admin.title"),
+            Loc.T("balloon.admin.not_elevated"),
+            TrayBalloonIcon.Info);
+    }
+
+    private void WarnAboutElevatedWindow(ForegroundWindowInfo info)    {
         if (info.Handle == IntPtr.Zero || !info.IsElevated || ElevationHelper.IsProcessElevated)
         {
             return;

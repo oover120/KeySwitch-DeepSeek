@@ -154,6 +154,11 @@ public sealed class AppHost : IDisposable
             _logger.Error("Синхронизация автозапуска не удалась", ex);
         }
 
+        if (_settings.RunAsAdmin && !ElevationHelper.IsProcessElevated)
+        {
+            _tray.ShowAdminRestartHint();
+        }
+
         if (_settings.SafeMode)
         {
             _logger.Warn("Включён безопасный режим: хук клавиатуры не запускается.");
