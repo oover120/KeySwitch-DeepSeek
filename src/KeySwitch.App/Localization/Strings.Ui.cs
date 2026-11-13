@@ -57,6 +57,12 @@ internal static class UiStrings
         ["general.pause.header"] = "Pause/Break — пауза",
         ["general.pause.description"] =
             "Фиксированная клавиша: временно приостановить автопереключение.",
+        ["general.section.games"] = "Игры",
+        ["general.games.header"] = "Не исправлять раскладку в играх",
+        ["general.games.description"] =
+            "Автопереключение отключается в полноэкранных играх, в программах из папок Games и " +
+            "Steam/Epic/GOG, а также в окнах игровых движков (Unity, Unreal, SDL, GLFW). " +
+            "В обычных приложениях, включая браузеры, всё работает как обычно.",
         ["general.section.accuracy"] = "Точность",
         ["general.confidence.header"] = "Порог уверенности",
         ["general.confidence.description"] =
@@ -284,6 +290,12 @@ internal static class UiStrings
         ["general.pause.header"] = "Pause/Break pauses",
         ["general.pause.description"] =
             "A fixed key that temporarily pauses autoswitch.",
+        ["general.section.games"] = "Games",
+        ["general.games.header"] = "Do not correct layout in games",
+        ["general.games.description"] =
+            "Autoswitch turns off in fullscreen games, in programs from Games folders and " +
+            "Steam/Epic/GOG libraries, and in windows of game engines (Unity, Unreal, SDL, GLFW). " +
+            "Regular apps, browsers included, work as usual.",
         ["general.section.accuracy"] = "Accuracy",
         ["general.confidence.header"] = "Confidence threshold",
         ["general.confidence.description"] =

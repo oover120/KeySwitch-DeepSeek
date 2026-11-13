@@ -109,6 +109,21 @@
                 </StackPanel>
             </Border>
 
+            <TextBlock Text="{Binding [general.section.games], Source={x:Static loc:Loc.Instance}}"
+                       Style="{DynamicResource SectionTitleStyle}"
+                       Margin="2,0,0,10" />
+
+            <Border Style="{DynamicResource CardStyle}" Margin="0,0,0,18">
+                <StackPanel>
+                    <controls:SettingRow Header="{Binding [general.games.header], Source={x:Static loc:Loc.Instance}}"
+                                         Description="{Binding [general.games.description], Source={x:Static loc:Loc.Instance}}">
+                        <ToggleButton Style="{DynamicResource ToggleSwitchStyle}"
+                                      IsChecked="{Binding GameDetectionEnabled, Mode=TwoWay}"
+                                      IsEnabled="{Binding Enabled}" />
+                    </controls:SettingRow>
+                </StackPanel>
+            </Border>
+
             <TextBlock Text="{Binding [general.section.accuracy], Source={x:Static loc:Loc.Instance}}"
                        Style="{DynamicResource SectionTitleStyle}"
                        Margin="2,0,0,10" />

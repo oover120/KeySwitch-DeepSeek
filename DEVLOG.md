@@ -450,3 +450,38 @@ non-nullable `ExceptionMode`. Язык применяется сохранени
 **Не сделано.** Живой прогон стендом в этот раз не удался: `GetForegroundWindow()` в сессии
 возвращает 0 (экран заблокирован), клавиши доставить некуда. Проверка — тестами и реальными
 словарями; в приложении тот же код.
+
+## Этап 18. Игры: три признака и галочка в настройках
+
+**Задача.** Пользователь: «сделаем чтоб в играх автоисправление не работало во всех, добавь в
+настройки и по умолчанию активируй галочку».
+
+**Что было.** Правило одно — полноэкранное окно (кроме браузеров) плюс отдельная проверка папки
+`\Games\` в `ExceptionStore`. Игры из Steam/Epic/GOG, Unity-игры в окне и игры в произвольных
+папках не отключались. Настройка `GameDetectionEnabled` жила в `settings.json` (по умолчанию
+`true`), но в окне настроек её не было.
+
+**Сделано.**
+- `src/KeySwitch.Hooks/WindowInspector.cs` — в `ForegroundWindowInfo` добавлено поле
+  `string ClassName = ""` (последним, с значением по умолчанию, чтобы не трогать конструкторы),
+  заполняется `NativeMethods.GetWindowClass(window)` в `Inspect`.
+- `src/KeySwitch.Hooks/WindowClassification.cs` — переписан: `IsGameDirectory` (13 маркеров
+  игровых библиотек), `IsGameWindowClass` (11 классов движков), `IsGame` = полный экран ∪
+  игровая папка ∪ класс окна. `IsFullscreenGame` остался и учитывает браузеры.
+- `src/KeySwitch.App/Services/AutoSwitchService.cs` — `IsGameOrProtected` вызывает
+  `WindowClassification.IsGame(info)` вместо двух отдельных проверок.
+- `src/KeySwitch.App/Views/Tabs/GeneralTab.xaml` — новый раздел «Игры» с тумблером
+  «Не исправлять раскладку в играх» (`GameDetectionEnabled`), виден на вкладке «Общие».
+- `src/KeySwitch.App/ViewModels/SettingsViewModel.cs` — свойство `GameDetectionEnabled`,
+  чтение в `Load` и запись в `CopyToSettings`.
+- `src/KeySwitch.App/Localization/Strings.Ui.cs` — `general.section.games`,
+  `general.games.header`, `general.games.description` (RU/EN).
+- `src/KeySwitch.Tests/WindowClassificationTests.cs` — помощник `Window` принимает путь и класс
+  окна; +34 случая: 12 игровых путей, 7 обычных, 6 классов движков, 5 обычных классов, итоговое
+  правило (окно + игровая папка, окно + Unity, браузер в полный экран — не игра).
+
+**Проверено.** `dotnet build KeySwitch.sln -c Release` — 0/0; `dotnet test` — **467/467**
+(было 429, добавлено 38).
+
+**Не сделано.** Игра в окне с обычной рамкой вне игровых папок и не на известном движке
+по-прежнему неотличима от приложения — это записано в D035 и в README.

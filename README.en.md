@@ -37,7 +37,7 @@ The app lives in the tray as an `RU` / `EN` icon. There is no main window.
 | **Force conversion** | If autoswitch left a word alone (unknown word, code, abbreviation), a double `Shift` converts the last word to the other layout on demand. |
 | **Self-learning** | A word you undo three times stops being converted. Only the word and a counter are stored — no context, no windows, no typing history. |
 | **Exceptions** | Apps with modes "disabled / manual only / full", game folders, individual words with a direction. |
-| **Games and passwords** | Fullscreen games pause switching (browsers do not), password fields and password-looking strings are never touched. |
+| **Games and passwords** | Games pause switching on three signals: fullscreen (browsers excluded), Steam/Epic/GOG/Battle.net/Games folders, Unity/Unreal/SDL/GLFW engine windows. Settings toggle, on by default. Password fields and password-looking strings are never touched. |
 | **Typos** | Auto-fix of common mistakes (`тоесть` → `то есть`, `teh` → `the`), rules live in an editable file. |
 | **"ИСправление"** | `ПРивет` → `Привет`: two capitals at the start of a word. |
 | **Yo-fixer** | Adds `ё` only where the dictionary is unambiguous. |

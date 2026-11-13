@@ -16,7 +16,8 @@ public sealed record ForegroundWindowInfo(
     string LayoutId,
     bool IsElevated,
     bool IsFullscreen,
-    bool IsConsole);
+    bool IsConsole,
+    string ClassName = "");
 
 /// <summary>
 /// Инспекция окна переднего плана. Результат кэшируется на <see cref="CacheTtlMs"/>:
@@ -107,7 +108,8 @@ public sealed class WindowInspector
         bool console = IsConsoleWindow(window);
 
         return new ForegroundWindowInfo(
-            window, pid, processName, processPath, layoutId, elevated, fullscreen, console);
+            window, pid, processName, processPath, layoutId, elevated, fullscreen, console,
+            NativeMethods.GetWindowClass(window));
     }
 
     /// <summary>

@@ -37,6 +37,7 @@ public sealed class SettingsViewModel : ViewModelBase
     private int _earlySwitchMinLength;
     private bool _singleShiftSwitch;
     private bool _doubleShiftUndo;
+    private bool _gameDetectionEnabled;
     private double _confidenceThreshold;
     private bool _startWithWindows;
     private bool _runAsAdmin;
@@ -217,6 +218,13 @@ public sealed class SettingsViewModel : ViewModelBase
     {
         get => _doubleShiftUndo;
         set => SetProperty(ref _doubleShiftUndo, value);
+    }
+
+    /// <summary>Не исправлять раскладку в играх: полноэкранные игры, папки с играми, движки.</summary>
+    public bool GameDetectionEnabled
+    {
+        get => _gameDetectionEnabled;
+        set => SetProperty(ref _gameDetectionEnabled, value);
     }
 
     public double ConfidenceThreshold
@@ -419,6 +427,7 @@ public sealed class SettingsViewModel : ViewModelBase
         EarlySwitchMinLength = _settings.EarlySwitchMinLength;
         SingleShiftSwitch = _settings.SingleShiftSwitch;
         DoubleShiftUndo = _settings.DoubleShiftUndo;
+        GameDetectionEnabled = _settings.GameDetectionEnabled;
         ConfidenceThreshold = _settings.ConfidenceThreshold;
         StartWithWindows = _settings.StartWithWindows;
         RunAsAdmin = _settings.RunAsAdmin;
@@ -565,6 +574,7 @@ public sealed class SettingsViewModel : ViewModelBase
         _settings.EarlySwitchMinLength = Math.Clamp(EarlySwitchMinLength, 2, 20);
         _settings.SingleShiftSwitch = SingleShiftSwitch;
         _settings.DoubleShiftUndo = DoubleShiftUndo;
+        _settings.GameDetectionEnabled = GameDetectionEnabled;
         _settings.ConfidenceThreshold = Math.Clamp(Math.Round(ConfidenceThreshold, 2), 0.5, 5.0);
         _settings.StartWithWindows = StartWithWindows;
         _settings.RunAsAdmin = RunAsAdmin;

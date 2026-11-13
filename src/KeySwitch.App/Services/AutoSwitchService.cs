@@ -787,12 +787,10 @@ public sealed class AutoSwitchService : IDisposable
     {
         if (_settings.GameDetectionEnabled)
         {
-            // Полноэкранный браузер — это F11, полноэкранное видео или PWA, а не игра:
-            // правило живёт в WindowClassification, потому что покрыто тестами.
-            if (WindowClassification.IsFullscreenGame(info))
-                return true;
-
-            if (ExceptionStore.IsGamesFolder(info.ProcessPath))
+            // Три признака игры (полный экран, игровая папка, класс окна движка) живут
+            // в WindowClassification: полноэкранный браузер игрой не считается, а само
+            // правило покрыто тестами.
+            if (WindowClassification.IsGame(info))
                 return true;
         }
 
