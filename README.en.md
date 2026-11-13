@@ -7,7 +7,7 @@ Typed `руддщ` — got `hello`. No internet, no telemetry, no cloud.
 
 [![Windows 11 x64](https://img.shields.io/badge/Windows-11%20x64-0078D6?logo=windows11&logoColor=white)](#installation)
 [![.NET 8](https://img.shields.io/badge/.NET-8.0-512BD4?logo=dotnet&logoColor=white)](#building-from-source)
-[![Tests](https://img.shields.io/badge/tests-408%20passed-brightgreen)](#accuracy)
+[![Tests](https://img.shields.io/badge/tests-467%20passed-brightgreen)](#accuracy)
 [![Network](https://img.shields.io/badge/network-none-critical)](#privacy)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
@@ -95,7 +95,7 @@ Typical correction time measured on a live system: **25–31 ms** from space to 
 
 | Metric | Result |
 |---|---|
-| Unit tests | 408 passed |
+| Unit tests | 467 passed |
 | RU words, typed in EN layout | 99.64 % switched correctly (553/555) |
 | RU words, typed in RU layout (reverse) | 99.64 % |
 | EN words, typed in RU layout | 100.00 % (820/820) |
@@ -118,7 +118,7 @@ Settings, exceptions, learning counters and logs live in `%APPDATA%\KeySwitchDee
 
 ## Limitations (honest)
 
-- **Memory**: about 110 MB at idle, ~190 MB after the settings window was opened once (WPF loads
+- **Memory**: about 108 MB at idle, ~190 MB after the settings window was opened once (WPF loads
   Direct3D and does not give it back). The target was 80 MB; the reason and the measurements are
   in `DECISIONS.md` (D023). If you need it lower, the settings UI can be moved out of the idle path.
 - **Elevated windows**: without administrator rights the hook cannot see keystrokes in elevated
@@ -142,7 +142,7 @@ Settings, exceptions, learning counters and logs live in `%APPDATA%\KeySwitchDee
 
 ```powershell
 dotnet build KeySwitch.sln -c Release      # build
-dotnet test src\KeySwitch.Tests -c Release # 408 tests
+dotnet test src\KeySwitch.Tests -c Release # 467 tests
 .\publish.ps1                              # build + test + publish to artifacts\publish
 ```
 
@@ -161,7 +161,7 @@ The installer is built from `installer\KeySwitchDeepSeek.iss` (Inno Setup 6.3+, 
 | `src/KeySwitch.Data` | Dictionaries, n-gram models, settings, exceptions, learning, logs |
 | `src/KeySwitch.Hooks` | Keyboard hook, `SendInput`, layout switching, UI Automation, clipboard |
 | `src/KeySwitch.App` | Tray, orchestration, WPF settings window, localization |
-| `src/KeySwitch.Tests` | 408 xUnit tests |
+| `src/KeySwitch.Tests` | 467 xUnit tests |
 | `tools/Evaluate` | Corpus runner: accuracy and false-positive metrics |
 | `tools/BuildAssets` | Asset generator (dictionaries, n-grams, yo pairs, typo rules) |
 | `tools/probe` | Live end-to-end stand (Notepad / Chrome) |
