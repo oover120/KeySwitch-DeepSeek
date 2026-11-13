@@ -377,7 +377,7 @@ non-nullable `ExceptionMode`. Язык применяется сохранени
 - src/KeySwitch.App/Localization/Strings.Ui.cs — подписи настройки в RU и EN описывают обе роли.
 - src/KeySwitch.Tests/ForceConvertTests.cs — 8 тестов (буфер, последнее слово, короткое слово,
   отсутствие слова, отмена после принудительной конвертации, сброс undo, обратное направление).
-- 	ools/probe/run-ks.ps1 — параметр -Scenario auto|force; force печатает hello + пробел
+- tools/probe/run-ks.ps1 — параметр -Scenario auto|force; force печатает hello + пробел
   и дважды тапает левый Shift.
 
 **Проверено.**
@@ -386,7 +386,43 @@ non-nullable `ExceptionMode`. Язык применяется сохранени
   двойной Shift: отменять нечего → Принудительная конвертация … en-US->ru-RU →
   Исправление: завершено за 23 мс; поле руддщ.
 - Стенд, Chrome: то же, pause=12мс, завершено за 31 мс; заголовок страницы F:руддщ.
-- Опубликовано: rtifacts\publish\KeySwitchDeepSeek.exe.
+- Опубликовано: artifacts\publish\KeySwitchDeepSeek.exe.
 
 **Не сделано.** Установщик не пересобран (Inno Setup на машине нет); живой набор физической
 клавиатурой в чужом окне проверяет только человек.
+
+## Этап 16. Ручная проверка обновлений (1.2.1)
+
+**Зачем.** Пользователь поставил 1.0.5 из другого репозитория (KeySwitch-GPT) и удивился,
+что «Проверить обновления» отвечает «последняя версия». У нашего продукта проверки не было
+вовсе — добавили, по явному нажатию (см. D033).
+
+**Сделано.**
+- `src/KeySwitch.Core/Updates/UpdateInfo.cs`, `ReleaseParser.cs` — разбор ответа GitHub без сети:
+  версия из `tag_name`, ссылка на `.exe` из `assets`, откат на `html_url`, обрезка заметок до 700 символов.
+- `src/KeySwitch.App/Services/UpdateChecker.cs` — один GET к `releases/latest`, таймаут 10 с,
+  `User-Agent: KeySwitchDeepSeek`, без токенов; любая ошибка возвращается как текст, не исключение.
+- `src/KeySwitch.App/Services/UpdateService.cs` — проверка на отдельном STA-потоке
+  `KeySwitch.UpdateCheck` и модальный диалог: «последняя версия» / «доступна X (у вас Y)» с переходом
+  на страницу загрузки.
+- `src/KeySwitch.App/Services/TrayService.cs` — `CommandUpdate = 7`, пункт `tray.update` перед «Выход»,
+  событие `UpdateRequested`.
+- `src/KeySwitch.App/Services/AppHost.cs` — подписка `_tray.UpdateRequested += (_, _) => UpdateService.CheckInBackground(_logger.Info);`.
+- `src/KeySwitch.App/ViewModels/SettingsViewModel.cs` — `CheckUpdatesCommand`; кнопка на вкладке
+  «О программе» рядом с «Открыть README» (`Views/Tabs/AboutTab.xaml`).
+- Локализация: `tray.update`, `about.checkUpdates`, `update.title`, `update.upToDate`,
+  `update.available`, `update.failed` — RU и EN.
+- Версия 1.2.1 (`Directory.Build.props`, `app.manifest`).
+
+**Проверено.**
+- `dotnet build KeySwitch.sln -c Release` — 0 ошибок, 0 предупреждений; `dotnet test` — **408/408**
+  (24 новых теста разбора релиза).
+- Проверка на живом API из отдельной консоли с `ReleaseParser`: установленная 1.0.5 → «доступна 1.2.0»,
+  установленная 1.2.1 → «обновлений нет»; ссылка на ассет
+  `.../releases/download/v1.2.0/KeySwitchDeepSeek.exe` разобрана верно.
+- `publish.ps1 -SkipTests` → `artifacts\publish\KeySwitchDeepSeek.exe` 150 916 178 б; смоук —
+  процесс живёт, журнал `KeySwitch DeepSeek запущен (v1.2.1.0)`.
+
+**Не сделано.** Установщик не скомпилирован (Inno Setup нет); нажатие пункта трея мышью
+в сессии агента не проверено — проверены сам запрос, разбор и диалог.
+

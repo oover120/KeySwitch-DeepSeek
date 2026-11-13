@@ -118,6 +118,7 @@ public sealed class SettingsViewModel : ViewModelBase
         RemoveTypoCommand = new RelayCommand(parameter => RemoveTypo(parameter as TypoRow));
         OpenDataFolderCommand = new RelayCommand(OpenDataFolder);
         OpenReadmeCommand = new RelayCommand(OpenReadme);
+        CheckUpdatesCommand = new RelayCommand(() => UpdateService.CheckInBackground(null));
 
         _licensesRaw = LoadLicenses();
         VersionText = ReadVersion();
@@ -177,6 +178,8 @@ public sealed class SettingsViewModel : ViewModelBase
     public ICommand OpenDataFolderCommand { get; }
 
     public ICommand OpenReadmeCommand { get; }
+
+    public ICommand CheckUpdatesCommand { get; }
 
     //────────────────────────────── Общие ──────────────────────────────
 

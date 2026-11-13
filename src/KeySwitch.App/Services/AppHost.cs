@@ -129,6 +129,7 @@ public sealed class AppHost : IDisposable
         _tray.SettingsRequested += (_, _) => OpenSettings();
         _tray.ExceptionsRequested += (_, _) => OpenSettings();
         _tray.ExitRequested += (_, _) => System.Windows.Application.Current?.Shutdown();
+        _tray.UpdateRequested += (_, _) => UpdateService.CheckInBackground(_logger.Info);
     }
 
     public AppSettings Settings => _settings;

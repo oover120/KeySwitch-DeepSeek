@@ -159,6 +159,11 @@ internal static class UiStrings
         ["about.dataFolder"] = "Папка данных",
         ["about.openDataFolder"] = "Открыть папку данных",
         ["about.openReadme"] = "Открыть README",
+        ["about.checkUpdates"] = "Проверить обновления",
+        ["update.title"] = "Обновления",
+        ["update.upToDate"] = "Установлена последняя версия: {0}.",
+        ["update.available"] = "Доступна версия {0} (у вас {1}).\n\nОткрыть страницу загрузки?",
+        ["update.failed"] = "Не удалось проверить обновления.\n\n{0}",
         ["about.dictionaries"] = "Словари и лицензии",
         ["about.licensesFallback"] =
             "Встроенные словари и таблицы частот собраны из открытых источников.\n" +
@@ -382,6 +387,11 @@ internal static class UiStrings
         ["about.dataFolder"] = "Data folder",
         ["about.openDataFolder"] = "Open data folder",
         ["about.openReadme"] = "Open README",
+        ["about.checkUpdates"] = "Check for updates",
+        ["update.title"] = "Updates",
+        ["update.upToDate"] = "You have the latest version: {0}.",
+        ["update.available"] = "Version {0} is available (you have {1}).\n\nOpen the download page?",
+        ["update.failed"] = "Could not check for updates.\n\n{0}",
         ["about.dictionaries"] = "Dictionaries and licenses",
         ["about.licensesFallback"] =
             "The built-in dictionaries and frequency tables come from open sources.\n" +

@@ -100,6 +100,9 @@
                                 Margin="10,0,0,0"
                                 Style="{DynamicResource LinkButtonStyle}"
                                 Command="{Binding OpenReadmeCommand}" />
+                        <Button Content="{Binding [about.checkUpdates], Source={x:Static loc:Loc.Instance}}"
+                                Margin="10,0,0,0"
+                                Command="{Binding CheckUpdatesCommand}" />
                     </StackPanel>
 
                     <Border Style="{DynamicResource DividerStyle}" Margin="0,16,0,12" />

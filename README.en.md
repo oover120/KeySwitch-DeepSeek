@@ -7,7 +7,7 @@ Typed `руддщ` — got `hello`. No internet, no telemetry, no cloud.
 
 [![Windows 11 x64](https://img.shields.io/badge/Windows-11%20x64-0078D6?logo=windows11&logoColor=white)](#installation)
 [![.NET 8](https://img.shields.io/badge/.NET-8.0-512BD4?logo=dotnet&logoColor=white)](#building-from-source)
-[![Tests](https://img.shields.io/badge/tests-376%20passed-brightgreen)](#accuracy)
+[![Tests](https://img.shields.io/badge/tests-408%20passed-brightgreen)](#accuracy)
 [![Network](https://img.shields.io/badge/network-none-critical)](#privacy)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
@@ -42,6 +42,7 @@ The app lives in the tray as an `RU` / `EN` icon. There is no main window.
 | **Yo-fixer** | Adds `ё` only where the dictionary is unambiguous. |
 | **Sounds** | Optional WAV cues on switch and on typo fix, with volume control. |
 | **Bilingual UI** | The settings window and tray menu switch language on the fly, no restart. Defaults to the Windows language. |
+| **Update check** | “Check for updates…” in the tray menu and a button on the About tab: a single GitHub request, only when clicked. |
 
 Everything except auto-switching is off by default: the app starts working without
 any setup and stays out of the way until you ask for more.
@@ -89,7 +90,7 @@ Typical correction time measured on a live system: **25–31 ms** from space to 
 
 | Metric | Result |
 |---|---|
-| Unit tests | 376 passed |
+| Unit tests | 408 passed |
 | RU words, typed in EN layout | 99.64 % switched correctly (553/555) |
 | RU words, typed in RU layout (reverse) | 99.64 % |
 | EN words, typed in RU layout | 100.00 % (820/820) |
@@ -126,7 +127,8 @@ Settings, exceptions, learning counters and logs live in `%APPDATA%\KeySwitchDee
 
 ## Privacy
 
-- No network activity at all: no telemetry, no update checks, no analytics.
+- No background network activity: the only request is a manual update check — a GET of the
+  latest GitHub release, with no identifiers and no telemetry.
 - Keystrokes are never written to disk. The log contains technical events only — no typed text.
 - Self-learning stores only the word and a counter. There is no typing history, no context,
   no screenshots, no clipboard archive.
@@ -135,7 +137,7 @@ Settings, exceptions, learning counters and logs live in `%APPDATA%\KeySwitchDee
 
 ```powershell
 dotnet build KeySwitch.sln -c Release      # build
-dotnet test src\KeySwitch.Tests -c Release # 376 tests
+dotnet test src\KeySwitch.Tests -c Release # 408 tests
 .\publish.ps1                              # build + test + publish to artifacts\publish
 ```
 
@@ -150,7 +152,7 @@ The installer script is `installer\KeySwitchDeepSeek.iss` (Inno Setup 6.3+, per-
 | `src/KeySwitch.Data` | Dictionaries, n-gram models, settings, exceptions, learning, logs |
 | `src/KeySwitch.Hooks` | Keyboard hook, `SendInput`, layout switching, UI Automation, clipboard |
 | `src/KeySwitch.App` | Tray, orchestration, WPF settings window, localization |
-| `src/KeySwitch.Tests` | 376 xUnit tests |
+| `src/KeySwitch.Tests` | 408 xUnit tests |
 | `tools/Evaluate` | Corpus runner: accuracy and false-positive metrics |
 | `tools/BuildAssets` | Asset generator (dictionaries, n-grams, yo pairs, typo rules) |
 | `tools/probe` | Live end-to-end stand (Notepad / Chrome) |

@@ -19,6 +19,7 @@ internal static class RuntimeStrings
         ["tray.settings"] = "Настройки…",
         ["tray.autostart"] = "Запускать при входе в Windows",
         ["tray.runasadmin"] = "Запускать от администратора",
+        ["tray.update"] = "Проверить обновления…",
         ["tray.exit"] = "Выход",
 
         // Подсказка значка: "KeySwitch DeepSeek · {язык} · {статус}".
@@ -60,6 +61,7 @@ internal static class RuntimeStrings
         ["tray.settings"] = "Settings…",
         ["tray.autostart"] = "Start with Windows",
         ["tray.runasadmin"] = "Run as administrator",
+        ["tray.update"] = "Check for updates…",
         ["tray.exit"] = "Exit",
 
         // Tray tooltip: "KeySwitch DeepSeek · language · status".

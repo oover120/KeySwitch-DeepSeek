@@ -83,6 +83,7 @@ public sealed class TrayService : IDisposable
     private const uint CommandAutostart = 4;
     private const uint CommandAdmin = 5;
     private const uint CommandExit = 6;
+    private const uint CommandUpdate = 7;
 
     private const uint MF_STRING = 0x00000000;
     private const uint MF_SEPARATOR = 0x00000800;
@@ -209,6 +210,9 @@ public sealed class TrayService : IDisposable
 
     /// <summary>Пользователь выбрал «Выход».</summary>
     public event EventHandler? ExitRequested;
+
+    /// <summary>Пользователь выбрал «Проверить обновления».</summary>
+    public event EventHandler? UpdateRequested;
 
     /// <summary>Показывает уведомление из трея (например, о неудачном изменении автозапуска).</summary>
     public void ShowBalloon(string title, string text, TrayBalloonIcon icon = TrayBalloonIcon.Info)
@@ -461,6 +465,7 @@ public sealed class TrayService : IDisposable
                 Loc.T("tray.runasadmin"));
 
             AppendMenuW(menu, MF_SEPARATOR, UIntPtr.Zero, null);
+            AppendMenuW(menu, MF_STRING, (UIntPtr)CommandUpdate, Loc.T("tray.update"));
             AppendMenuW(menu, MF_STRING, (UIntPtr)CommandExit, Loc.T("tray.exit"));
 
             // Окно трея скрыто и неактивно. Без SetForegroundWindow меню не закроется
@@ -512,6 +517,7 @@ public sealed class TrayService : IDisposable
             CommandSettings => () => SettingsRequested?.Invoke(this, EventArgs.Empty),
             CommandAutostart => ToggleAutostart,
             CommandAdmin => ToggleRunAsAdmin,
+            CommandUpdate => () => UpdateRequested?.Invoke(this, EventArgs.Empty),
             CommandExit => () => ExitRequested?.Invoke(this, EventArgs.Empty),
             _ => null,
         };
