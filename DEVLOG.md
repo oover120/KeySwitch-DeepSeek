@@ -508,8 +508,8 @@ non-nullable `ExceptionMode`. Язык применяется сохранени
 
 **Проверено.**
 - Сборка: `ISCC.exe /DMyAppVersion=1.2.3 installer\KeySwitchDeepSeek.iss` — без предупреждений,
-  `artifacts\installer\KeySwitchDeepSeek-1.2.3-setup.exe` = 51 111 934 б (48,7 МБ),
-  SHA-256 `530E2378…53D2`, свойства файла: ProductName «KeySwitch DeepSeek», FileVersion 1.2.3.
+  `artifacts\installer\KeySwitchDeepSeek-1.2.3-setup.exe` = 51 112 215 б (48,7 МБ),
+  SHA-256 `1B8B38DA…6B90`, свойства файла: ProductName «KeySwitch DeepSeek», FileVersion 1.2.3.
 - Тихая установка `/VERYSILENT`: exit 0; в `%LOCALAPPDATA%\Programs\KeySwitchDeepSeek` лежат
   `KeySwitchDeepSeek.exe` (150 921 810 б, FileVersion 1.2.3.0), `unins000.exe`, `unins000.dat`;
   ярлык «KeySwitch DeepSeek» в меню «Пуск»; запись Uninstall «KeySwitch DeepSeek —
