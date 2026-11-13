@@ -485,3 +485,41 @@ non-nullable `ExceptionMode`. Язык применяется сохранени
 
 **Не сделано.** Игра в окне с обычной рамкой вне игровых папок и не на известном движке
 по-прежнему неотличима от приложения — это записано в D035 и в README.
+## Этап 19 — установщик Inno Setup (1.2.3)
+
+**Зачем.** До этого релизы содержали только портативный `KeySwitchDeepSeek.exe`: установка
+сводилась к копированию файла вручную, не было ни ярлыка, ни записи в «Удаление программ»,
+ни штатного деинсталлятора. Пользователь просил установщик.
+
+**Что сделано.**
+- Inno Setup 6.7.3 установлен через `winget install JRSoftware.InnoSetup` (per-user,
+  `%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe`).
+- `installer/KeySwitchDeepSeek.iss`: версия больше не зашита в файл —
+  `#ifndef MyAppVersion / #define MyAppVersion "1.2.3" / #endif`, значение передаётся
+  `/DMyAppVersion=…`. Добавлены `VersionInfoVersion`, `VersionInfoCompany`,
+  `VersionInfoProductName`, `VersionInfoDescription` — без них Inno не подставлял свойства
+  файла, потому что в `AppName` используется `{cm:AppName}`.
+- `[UninstallDelete] Type: filesandordirs; Name: "{app}"` — после удаления файлов пустая
+  папка больше не остаётся.
+- `[Code] CurUninstallStepChanged` — значение `HKCU\...\Run\KeySwitchDeepSeek` удаляется
+  всегда, а не только если при установке была отмечена галочка автозапуска: пользователь
+  мог включить автозапуск позже, из настроек, и тогда после удаления оставался битый ключ.
+- Настройки и журналы в `%APPDATA%\KeySwitchDeepSeek` при удалении намеренно не трогаются.
+
+**Проверено.**
+- Сборка: `ISCC.exe /DMyAppVersion=1.2.3 installer\KeySwitchDeepSeek.iss` — без предупреждений,
+  `artifacts\installer\KeySwitchDeepSeek-1.2.3-setup.exe` = 51 111 934 б (48,7 МБ),
+  SHA-256 `530E2378…53D2`, свойства файла: ProductName «KeySwitch DeepSeek», FileVersion 1.2.3.
+- Тихая установка `/VERYSILENT`: exit 0; в `%LOCALAPPDATA%\Programs\KeySwitchDeepSeek` лежат
+  `KeySwitchDeepSeek.exe` (150 921 810 б, FileVersion 1.2.3.0), `unins000.exe`, `unins000.dat`;
+  ярлык «KeySwitch DeepSeek» в меню «Пуск»; запись Uninstall «KeySwitch DeepSeek —
+  переключение раскладки», версия 1.2.3, издатель oover120.
+- Тиxое удаление: exit 0, папка исчезла, запись Uninstall исчезла, ярлык исчез, значение
+  `HKCU\...\Run` удалено.
+- Запуск установленной копии: процесс живёт, ws 108 МБ, 20 потоков; журнал
+  `KeySwitch DeepSeek запущен (v1.2.3.0)` → `Файл приложения: …\Programs\KeySwitchDeepSeek\…`
+  → `Языковые ресурсы загружены` → `Автопереключение запущено`; автозапуск восстановлен
+  приложением из `settings.json` (`startWithWindows = true`).
+
+**Не сделано.** Установщик не подписан (SmartScreen покажет предупреждение), загрузка
+обновлений по-прежнему вручную через страницу релиза.

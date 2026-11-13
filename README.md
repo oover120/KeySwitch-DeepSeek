@@ -58,16 +58,18 @@ KeySwitch DeepSeek следит за тем, что вы печатаете, и 
 
 ## Установка
 
-1. Скачайте `KeySwitchDeepSeek.exe` из [раздела Releases](../../releases/latest) и запустите.
-   Установка не требует прав администратора, .NET устанавливать не нужно — сборка
+1. Скачайте `KeySwitchDeepSeek-1.2.3-setup.exe` из [раздела Releases](../../releases/latest)
+   и запустите. Прав администратора не нужно: программа ставится в
+   `%LOCALAPPDATA%\Programs\KeySwitchDeepSeek`, добавляет ярлык в меню «Пуск», запись
+   «Удаление программ» и штатный деинсталлятор. .NET устанавливать не требуется — сборка
    self-contained.
 2. Иконка `RU` или `EN` появится в трее.
 3. Правый клик → **Настройки**; при желании включите **Запускать при входе**.
 
 Требования: Windows 11 x64. Windows 10 1809+ работает, но не тестируется.
 
-Есть и установщик (`installer/KeySwitchDeepSeek.iss`, Inno Setup 6) — он кладёт программу
-в `%LOCALAPPDATA%\Programs\KeySwitchDeepSeek` и умеет удаляться штатно.
+Если установщик не нужен, в том же релизе лежит портативный `KeySwitchDeepSeek.exe` —
+он работает из любой папки без установки.
 
 ## Как это работает
 
@@ -156,7 +158,13 @@ dotnet run --project tools/Evaluate -c Release -- --corpus tools/Evaluate/corpus
 .\publish.ps1              # сборка + тесты + publish в artifacts\publish
 ```
 
-Установщик: `installer/KeySwitchDeepSeek.iss` (Inno Setup 6).
+Установщик собирается из `installer/KeySwitchDeepSeek.iss` (Inno Setup 6.3+, установка per-user):
+
+```powershell
+& "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe" /DMyAppVersion=1.2.3 installer\KeySwitchDeepSeek.iss
+```
+
+Результат — `artifacts\installer\KeySwitchDeepSeek-1.2.3-setup.exe` (~49 МБ, lzma2).
 
 Словари и n-граммы уже встроены в `KeySwitch.Data`; пересобрать их из открытых
 источников можно так:

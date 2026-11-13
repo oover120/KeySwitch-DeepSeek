@@ -5,11 +5,15 @@
 ; который использует само приложение и ElevationHelper).
 ;
 ; Сборка установщика: Inno Setup 6 → Compile, или
-;   "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\KeySwitchDeepSeek.iss
+;   "%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" installer\KeySwitchDeepSeek.iss
+; Версию можно передать снаружи, чтобы не править файл на каждый релиз:
+;   ISCC.exe /DMyAppVersion=1.2.3 installer\KeySwitchDeepSeek.iss
 ; Перед этим должен быть выполнен publish.ps1 (incoming файлы в artifacts\publish).
 
 #define MyAppName "KeySwitch DeepSeek"
-#define MyAppVersion "1.1.0"
+#ifndef MyAppVersion
+  #define MyAppVersion "1.2.3"
+#endif
 #define MyAppPublisher "oover120"
 #define MyAppExeName "KeySwitchDeepSeek.exe"
 #define MyAppId "{{3C9F1A72-5B4D-4E88-9A17-6D2B8E4F1C93}}"
@@ -41,6 +45,11 @@ WizardStyle=modern
 CloseApplications=yes
 RestartApplications=no
 UninstallDisplayName={cm:AppName}
+; Свойства файла установщика (иначе Inno не подставит их из-за {cm:} в AppName).
+VersionInfoVersion={#MyAppVersion}
+VersionInfoCompany={#MyAppPublisher}
+VersionInfoProductName={#MyAppName}
+VersionInfoDescription={#MyAppName} Setup
 
 [Languages]
 Name: "russian"; MessagesFile: "compiler:Languages\Russian.isl"
@@ -76,5 +85,19 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchApp}"; Flags: nowait postinstall skipifsilent
 
+[UninstallDelete]
+; Папка установки после удаления файлов может остаться пустой — убираем её.
+Type: filesandordirs; Name: "{app}"
+
 ; Пользовательские настройки и журналы (%APPDATA%\KeySwitchDeepSeek) намеренно не трогаем:
 ; при переустановке они должны остаться.
+
+[Code]
+{ Автозапуск мог включить сам пользователь уже после установки, поэтому значение
+  HKCU\...\Run удаляем всегда, независимо от выбранной при установке галочки. }
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usPostUninstall then
+    RegDeleteValue(HKEY_CURRENT_USER,
+      'Software\Microsoft\Windows\CurrentVersion\Run', 'KeySwitchDeepSeek');
+end;
