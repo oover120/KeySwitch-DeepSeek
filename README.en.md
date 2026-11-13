@@ -61,7 +61,7 @@ The interface is available in **Russian and English** — Settings → General �
 
 ## Installation
 
-1. Download `KeySwitchDeepSeek-1.2.3-setup.exe` from [Releases](../../releases/latest) and run
+1. Download `KeySwitchDeepSeek-1.2.4-setup.exe` from [Releases](../../releases/latest) and run
    it. No administrator rights: the app installs into `%LOCALAPPDATA%\Programs\KeySwitchDeepSeek`,
    adds a Start menu shortcut, an "Apps & features" entry and a proper uninstaller. No .NET
    install needed — the build is self-contained.
@@ -152,7 +152,7 @@ dotnet test src\KeySwitch.Tests -c Release # 467 tests
 The installer is built from `installer\KeySwitchDeepSeek.iss` (Inno Setup 6.3+, per-user install):
 
 ```powershell
-& "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe" /DMyAppVersion=1.2.3 installer\KeySwitchDeepSeek.iss
+& "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe" /DMyAppVersion=1.2.4 installer\KeySwitchDeepSeek.iss
 ```
 
 ## Repository structure

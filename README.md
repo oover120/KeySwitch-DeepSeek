@@ -58,7 +58,7 @@ KeySwitch DeepSeek следит за тем, что вы печатаете, и 
 
 ## Установка
 
-1. Скачайте `KeySwitchDeepSeek-1.2.3-setup.exe` из [раздела Releases](../../releases/latest)
+1. Скачайте `KeySwitchDeepSeek-1.2.4-setup.exe` из [раздела Releases](../../releases/latest)
    и запустите. Прав администратора не нужно: программа ставится в
    `%LOCALAPPDATA%\Programs\KeySwitchDeepSeek`, добавляет ярлык в меню «Пуск», запись
    «Удаление программ» и штатный деинсталлятор. .NET устанавливать не требуется — сборка
@@ -163,10 +163,10 @@ dotnet run --project tools/Evaluate -c Release -- --corpus tools/Evaluate/corpus
 Установщик собирается из `installer/KeySwitchDeepSeek.iss` (Inno Setup 6.3+, установка per-user):
 
 ```powershell
-& "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe" /DMyAppVersion=1.2.3 installer\KeySwitchDeepSeek.iss
+& "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe" /DMyAppVersion=1.2.4 installer\KeySwitchDeepSeek.iss
 ```
 
-Результат — `artifacts\installer\KeySwitchDeepSeek-1.2.3-setup.exe` (~49 МБ, lzma2).
+Результат — `artifacts\installer\KeySwitchDeepSeek-1.2.4-setup.exe` (~49 МБ, lzma2).
 
 Словари и n-граммы уже встроены в `KeySwitch.Data`; пересобрать их из открытых
 источников можно так:

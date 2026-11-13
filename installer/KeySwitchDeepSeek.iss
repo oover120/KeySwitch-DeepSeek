@@ -7,12 +7,12 @@
 ; Сборка установщика: Inno Setup 6 → Compile, или
 ;   "%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" installer\KeySwitchDeepSeek.iss
 ; Версию можно передать снаружи, чтобы не править файл на каждый релиз:
-;   ISCC.exe /DMyAppVersion=1.2.3 installer\KeySwitchDeepSeek.iss
+;   ISCC.exe /DMyAppVersion=1.2.4 installer\KeySwitchDeepSeek.iss
 ; Перед этим должен быть выполнен publish.ps1 (incoming файлы в artifacts\publish).
 
 #define MyAppName "KeySwitch DeepSeek"
 #ifndef MyAppVersion
-  #define MyAppVersion "1.2.3"
+  #define MyAppVersion "1.2.4"
 #endif
 #define MyAppPublisher "oover120"
 #define MyAppExeName "KeySwitchDeepSeek.exe"
