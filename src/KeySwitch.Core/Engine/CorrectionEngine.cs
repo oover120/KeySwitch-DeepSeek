@@ -113,7 +113,12 @@ public sealed class CorrectionEngine
 
         var plan = BuildPlan(token, terminator, terminatorAlreadyTyped, manual: false);
         if (plan == null)
+        {
+            // Последнее действие — «оставить как есть». Отменять нечего: иначе двойной Shift
+            // откатил бы исправление, сделанное несколькими словами раньше.
+            LastApplied = null;
             return new EngineResult(token, null, null);
+        }
 
         LastApplied = plan;
         return new EngineResult(token, plan, plan.Reason);
@@ -134,6 +139,40 @@ public sealed class CorrectionEngine
 
         LastApplied = plan;
         return new EngineResult(_lastWord, plan, plan.Reason);
+    }
+
+    /// <summary>
+    /// Принудительная конвертация последнего слова (или текущего буфера) без порога уверенности:
+    /// двойной тап Shift. Человек знает лучше детектора — незнакомое слово, код, аббревиатура.
+    /// Технические ограничения остаются: минимальная длина слова и наличие пары раскладок.
+    /// </summary>
+    public EngineResult ForceConvert()
+    {
+        if (!Buffer.IsEmpty)
+        {
+            var current = Buffer.ToToken();
+            Buffer.Clear();
+            _lastWord = current;
+            _lastTerminator = null;
+            _lastTerminatorTyped = false;
+
+            var currentPlan = BuildForcedPlan(current, null, terminatorAlreadyTyped: false);
+            if (currentPlan == null)
+                return new EngineResult(current, null, "конвертация не требуется");
+
+            LastApplied = currentPlan;
+            return new EngineResult(current, currentPlan, currentPlan.Reason);
+        }
+
+        if (_lastWord is not { } token)
+            return EngineResult.Empty;
+
+        var plan = BuildForcedPlan(token, _lastTerminator, _lastTerminatorTyped);
+        if (plan == null)
+            return new EngineResult(token, null, "конвертация не требуется");
+
+        LastApplied = plan;
+        return new EngineResult(token, plan, plan.Reason);
     }
 
     /// <summary>Конвертация произвольного текста (выделение). Возвращает null, если не нужно.</summary>
@@ -190,6 +229,34 @@ public sealed class CorrectionEngine
 
     /// <summary>Сбрасывает доступность отмены (например, пользователь начал новое слово).</summary>
     public void ClearUndo() => LastApplied = null;
+
+    private CorrectionPlan? BuildForcedPlan(WordToken token, char? terminator, bool terminatorAlreadyTyped)
+    {
+        var source = LayoutCatalog.TryGet(token.LayoutId);
+        if (source == null)
+            return null;
+
+        var detection = _detector.ForceConvert(token.Text, source);
+        if (!detection.Convert)
+            return null;
+
+        var deleteCount = token.Text.Length + (terminatorAlreadyTyped && terminator.HasValue ? 1 : 0);
+        var plan = new CorrectionPlan(
+            CorrectionKind.LayoutSwitch,
+            token.Text,
+            detection.ConvertedText,
+            deleteCount,
+            terminator,
+            detection.SourceLayoutId,
+            detection.TargetLayoutId,
+            1.0,
+            detection.Reason);
+
+        // Принудительная конвертация — сигнал «здесь должна быть другая раскладка»:
+        // записываем как положительный пример, чтобы в следующий раз детектор справился сам.
+        _learning.RecordAccepted(token.Text.ToLowerInvariant(), detection.SourceLayoutId, detection.TargetLayoutId);
+        return plan;
+    }
 
     private CorrectionPlan? BuildPlan(WordToken token, char? terminator, bool terminatorAlreadyTyped, bool manual)
     {

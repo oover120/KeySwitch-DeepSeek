@@ -8,7 +8,8 @@
 #
 # ASCII only: Windows PowerShell 5.1 reads UTF-8 without BOM as ANSI.
 param(
-    [Parameter(Mandatory = $true)][ValidateSet('notepad', 'chrome')][string]$Target
+    [Parameter(Mandatory = $true)][ValidateSet('notepad', 'chrome')][string]$Target,
+    [ValidateSet('auto', 'force')][string]$Scenario = 'auto'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -255,9 +256,24 @@ Start-Sleep -Milliseconds 2500
 [void](Set-TargetForeground $hwnd)
 Start-Sleep -Milliseconds 400
 
-Write-Output '--- INPUT: ghbdtn + space ---'
-foreach ($vk in @(0x47, 0x48, 0x42, 0x44, 0x54, 0x4E, 0x20)) { Send-Key $vk }
-Start-Sleep -Milliseconds 1200
+if ($Scenario -eq 'force') {
+    # hello is a valid English word: the detector keeps it, so only the double Shift can convert it.
+    Write-Output '--- INPUT: hello + space, then double LEFT Shift ---'
+    foreach ($vk in @(0x48, 0x45, 0x4C, 0x4C, 0x4F, 0x20)) { Send-Key $vk }
+    Start-Sleep -Milliseconds 600
+    for ($i = 0; $i -lt 2; $i++) {
+        [W]::keybd_event(0xA0, 0, 0, [UIntPtr]::Zero)
+        Start-Sleep -Milliseconds 30
+        [W]::keybd_event(0xA0, 0, 2, [UIntPtr]::Zero)
+        Start-Sleep -Milliseconds 90
+    }
+    Start-Sleep -Milliseconds 1200
+}
+else {
+    Write-Output '--- INPUT: ghbdtn + space ---'
+    foreach ($vk in @(0x47, 0x48, 0x42, 0x44, 0x54, 0x4E, 0x20)) { Send-Key $vk }
+    Start-Sleep -Milliseconds 1200
+}
 
 $fieldText = Get-FieldText $hwnd
 if ($Target -eq 'chrome') {

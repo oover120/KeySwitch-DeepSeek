@@ -33,6 +33,7 @@ The app lives in the tray as an `RU` / `EN` icon. There is no main window.
 | **Auto-switch** | At a word boundary (space, Enter, Tab) it detects the layout mistake and fixes it: `Backspace` × N → window layout switch → word and space in one `SendInput`. |
 | **Manual conversion** | `Pause/Break` converts the last word, `Ctrl+Shift+Space` converts the selected text (hotkey is configurable; `Alt+Shift` is never used — Windows owns it). |
 | **Undo** | Double `Shift` (two taps faster than 400 ms) or `Pause/Break` restores the original text and layout. |
+| **Force conversion** | If autoswitch left a word alone (unknown word, code, abbreviation), a double `Shift` converts the last word to the other layout on demand. |
 | **Self-learning** | A word you undo three times stops being converted. Only the word and a counter are stored — no context, no windows, no typing history. |
 | **Exceptions** | Apps with modes "disabled / manual only / full", game folders, individual words with a direction. |
 | **Games and passwords** | Fullscreen games pause switching (browsers do not), password fields and password-looking strings are never touched. |

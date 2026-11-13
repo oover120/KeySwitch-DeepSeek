@@ -95,6 +95,45 @@ public sealed class LayoutDetector
             sourceScore.Total, candidateScore.Total, false, candidateScore.InDictionary);
     }
 
+    /// <summary>
+    /// Принудительная конвертация по команде пользователя: тот же выбор прочтения, что и в
+    /// <see cref="Decide(string, LayoutTable)"/>, но без порога уверенности. Нужна, когда детектор
+    /// отказался переключать слово (незнакомое слово, код, аббревиатура), а человек уверен, что
+    /// раскладка не та. Ограничения остаются только технические: минимальная длина и наличие пары.
+    /// </summary>
+    public DetectionResult ForceConvert(string text, LayoutTable source)
+    {
+        var target = _pairs.GetAlternate(source);
+        if (target == null)
+            return DetectionResult.Keep(text, source.Id, "нет пары раскладок");
+
+        if (CountLetters(text) < _settings.MinWordLength)
+            return DetectionResult.Keep(text, source.Id, "слово слишком короткое");
+
+        var fullText = LayoutConverter.Convert(text, source, target);
+        if (string.Equals(fullText, text, StringComparison.Ordinal))
+            return DetectionResult.Keep(text, source.Id, "символы не конвертируются");
+
+        var targetScorer = GetScorer(target.Language);
+        var (core, tail) = WordText.SplitTrailingPunctuation(text);
+        var coreText = fullText;
+        if (targetScorer == null)
+            return new DetectionResult(true, 1.0, source.Id, target.Id, text, fullText,
+                "принудительно (нет языковых моделей)", 0, 0, false, false);
+
+        var fullScore = targetScorer.Score(fullText);
+        var coreScore = fullScore;
+        if (tail.Length > 0 && core.Length > 0)
+        {
+            coreText = LayoutConverter.Convert(core, source, target) + tail;
+            coreScore = targetScorer.Score(coreText);
+        }
+
+        var (candidateText, candidateScore, interpretation) = ChooseCandidate(fullText, fullScore, coreText, coreScore, tail);
+        return new DetectionResult(true, 1.0, source.Id, target.Id, text, candidateText,
+            $"принудительно ({interpretation})", 0, candidateScore.Total, false, candidateScore.InDictionary);
+    }
+
     private static (string Text, WordScore Score, string Interpretation) ChooseCandidate(
         string fullText, WordScore fullScore, string coreText, WordScore coreScore, string tail)
     {

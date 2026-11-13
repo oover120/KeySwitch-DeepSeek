@@ -48,9 +48,9 @@ internal static class UiStrings
         ["general.singleShift.header"] = "Одиночный Shift переключает раскладку",
         ["general.singleShift.description"] =
             "Одиночное нажатие Shift без других клавиш меняет язык ввода.",
-        ["general.doubleShift.header"] = "Двойной Shift отменяет автопереключение",
+        ["general.doubleShift.header"] = "Двойной Shift отменяет или переключает слово",
         ["general.doubleShift.description"] =
-            "Быстрое двойное нажатие Shift возвращает слово в исходном виде.",
+            "Быстрое двойное нажатие Shift: отменяет последнее исправление, а если его не было — принудительно переводит последнее слово в другую раскладку, даже когда автопереключение отказалось.",
         ["general.hotkey.header"] = "Ручная конвертация выделенного",
         ["general.hotkey.description"] =
             "Сочетание для принудительной смены раскладки. Нажмите на поле и введите сочетание; пусто — выключено.",
@@ -270,9 +270,9 @@ internal static class UiStrings
         ["general.singleShift.header"] = "Single Shift switches the layout",
         ["general.singleShift.description"] =
             "A single Shift press without other keys changes the input language.",
-        ["general.doubleShift.header"] = "Double Shift undoes autoswitch",
+        ["general.doubleShift.header"] = "Double Shift undoes or converts a word",
         ["general.doubleShift.description"] =
-            "A quick double Shift press returns the word to its original form.",
+            "A quick double Shift press undoes the last correction; if there was none, it force-converts the last word to the other layout even when autoswitch declined.",
         ["general.hotkey.header"] = "Manual conversion of the selection",
         ["general.hotkey.description"] =
             "Shortcut for a forced layout switch. Click the field and press a combination; empty means off.",

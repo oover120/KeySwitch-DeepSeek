@@ -472,10 +472,13 @@ public sealed class AutoSwitchService : IDisposable
 
         if (doubleTap)
         {
-            // Второй «тап» без других клавиш в пределах окна — отмена последнего исправления.
+            // Второй «тап» без других клавиш в пределах окна: если было исправление — отменяем его,
+            // иначе принудительно конвертируем последнее слово (детектор мог отказаться:
+            // незнакомое слово, код, аббревиатура — человек знает лучше).
             _lastShiftTapAt = long.MinValue / 2;
             CancelSingleShiftSwitch();
-            TryUndo("двойной Shift");
+            if (!TryUndo("двойной Shift"))
+                ForceConvertLastWord("двойной Shift");
             return;
         }
 
@@ -632,6 +635,27 @@ public sealed class AutoSwitchService : IDisposable
         var info = _tracker.Get();
         _executor.ExecutePlan(plan, info.Handle, info.ProcessName);
         PlayFixSound();
+    }
+
+    /// <summary>
+    /// Принудительная конвертация последнего слова по команде пользователя (двойной Shift),
+    /// когда отменять нечего: детектор слово оставил, а человек считает, что раскладка не та.
+    /// </summary>
+    private void ForceConvertLastWord(string reason)
+    {
+        var result = _engine.ForceConvert();
+        if (result.Plan is not { } plan)
+        {
+            _logger.Debug($"{reason}: принудительная конвертация не нужна ({result.Note ?? "нет слова"}).");
+            return;
+        }
+
+        var info = _tracker.Get();
+        _executor.ExecutePlan(plan, info.Handle, info.ProcessName);
+        PlayFixSound();
+        _logger.Info(
+            $"Принудительная конвертация ({reason}): proc={info.ProcessName} " +
+            $"символов={plan.OriginalText.Length} {plan.SourceLayoutId}->{plan.TargetLayoutId}");
     }
 
     private bool TryUndo(string reason)
