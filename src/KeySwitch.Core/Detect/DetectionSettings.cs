@@ -36,7 +36,7 @@ public sealed class DetectionSettings
     /// <summary>Порог уверенности для раннего переключения — очень высокий.</summary>
     public double EarlySwitchThreshold { get; set; } = 6.0;
 
-    /// <summary>Не переключать слова короче этого значения в режиме раннего срабатывания.</summary>
+    /// <summary>Учитывать частоты, если завершённое слово есть в словарях обеих раскладок.</summary>
     public bool UseFrequencyWeighting { get; set; } = true;
 
     public DetectionSettings Clone() => (DetectionSettings)MemberwiseClone();

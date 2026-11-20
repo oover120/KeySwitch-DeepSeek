@@ -10,6 +10,8 @@ namespace KeySwitch.Core.Detect;
 /// </summary>
 public sealed class LayoutDetector
 {
+    private const int MinDictionaryFrequencyRatio = 100;
+
     private readonly ILanguageResourcesProvider _resources;
     private readonly LayoutPairRegistry _pairs;
     private readonly DetectionSettings _settings;
@@ -59,8 +61,13 @@ public sealed class LayoutDetector
             return DetectionResult.Keep(text, source.Id, "нет языковых моделей");
 
         var sourceScore = sourceScorer.Score(text);
-        if (sourceScore.InDictionary)
-            return DetectionResult.Keep(text, source.Id, "слово есть в словаре исходного языка", sourceScore.Total);
+        var (core, tail) = WordText.SplitTrailingPunctuation(text);
+        if (sourceScore.InDictionary && (early || !_settings.UseFrequencyWeighting ||
+            source.Language != "en" || target.Language != "ru" || sourceScore.Frequency <= 0 ||
+            !IsEnglishConsonantSequence(core)))
+        {
+            return KeepSourceDictionaryWord(text, source, sourceScore);
+        }
 
         var fullText = LayoutConverter.Convert(text, source, target);
         if (string.Equals(fullText, text, StringComparison.Ordinal))
@@ -70,7 +77,6 @@ public sealed class LayoutDetector
 
         // Хвостовые знаки препинания: «ghbdtn,» — это «привет» + запятая,
         // а «[kt,» — это слово «хлеб», где запятая является буквой «б».
-        var (core, tail) = WordText.SplitTrailingPunctuation(text);
         var coreText = core;
         var coreScore = fullScore;
         if (tail.Length > 0 && core.Length > 0)
@@ -80,6 +86,16 @@ public sealed class LayoutDetector
         }
 
         var (candidateText, candidateScore, interpretation) = ChooseCandidate(fullText, fullScore, coreText, coreScore, tail);
+        if (sourceScore.InDictionary)
+        {
+            // Английский словарь содержит и сокращения. Для них сравниваем оценки,
+            // только если русское прочтение на два порядка чаще.
+            if (!candidateScore.InDictionary || candidateScore.Frequency < (long)sourceScore.Frequency * MinDictionaryFrequencyRatio)
+                return KeepSourceDictionaryWord(text, source, sourceScore);
+
+            interpretation = "сравнение словарных вариантов";
+        }
+
         var delta = candidateScore.Total - sourceScore.Total;
 
         var threshold = _settings.ConfidenceThreshold;
@@ -99,13 +115,17 @@ public sealed class LayoutDetector
         var reason = $"{interpretation}: Δ={delta:F2} (порог {threshold:F2}), " +
                      $"A={sourceScore.Total:F2}, B={candidateScore.Total:F2}";
 
-        if (delta < threshold)
-            return new DetectionResult(false, confidence, source.Id, target.Id, text, candidateText, reason,
-                sourceScore.Total, candidateScore.Total, false, candidateScore.InDictionary);
-
-        return new DetectionResult(true, confidence, source.Id, target.Id, text, candidateText, reason,
-            sourceScore.Total, candidateScore.Total, false, candidateScore.InDictionary);
+        return new DetectionResult(delta >= threshold, confidence, source.Id, target.Id, text, candidateText, reason,
+            sourceScore.Total, candidateScore.Total, sourceScore.InDictionary, candidateScore.InDictionary);
     }
+
+    private static bool IsEnglishConsonantSequence(string core)
+        => core.All(WordText.IsLatinLetter) && !core.Skip(1).Any(char.IsUpper)
+            && core.AsSpan().IndexOfAny("aeiouyAEIOUY") < 0;
+
+    private static DetectionResult KeepSourceDictionaryWord(string text, LayoutTable source, WordScore score)
+        => DetectionResult.Keep(text, source.Id, "слово есть в словаре исходного языка", score.Total)
+            with { SourceInDictionary = true };
 
     /// <summary>
     /// Принудительная конвертация по команде пользователя: тот же выбор прочтения, что и в

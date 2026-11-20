@@ -1,4 +1,5 @@
 using KeySwitch.Core.Detect;
+using KeySwitch.Core.Layout;
 using KeySwitch.Core.Learning;
 using KeySwitch.Core.Text;
 
@@ -237,7 +238,16 @@ public sealed class ExceptionStore : IExceptionPolicy
                 continue;
 
             if (!char.IsLetter(ch))
+            {
+                if (WordText.IsAmbiguousPunctuation(ch) && LayoutCatalog.TryGet(sourceLayoutId) is { } sourceLayout
+                    && LayoutCatalog.TryGet(targetLayoutId) is { } targetLayout
+                    && char.IsLetter(LayoutConverter.ConvertChar(ch, sourceLayout, targetLayout)))
+                {
+                    continue;
+                }
+
                 return WordVerdict.NotAWord;
+            }
 
             letters++;
             if (WordText.IsLatinLetter(ch))

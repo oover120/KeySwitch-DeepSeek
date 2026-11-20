@@ -1,7 +1,11 @@
 using System.IO;
+using KeySwitch.Core.Correction;
 using KeySwitch.Core.Detect;
+using KeySwitch.Core.Engine;
+using KeySwitch.Core.Input;
 using KeySwitch.Core.Layout;
 using KeySwitch.Core.Learning;
+using KeySwitch.Core.PostProcess;
 using KeySwitch.Data;
 using Xunit;
 
@@ -176,6 +180,74 @@ public class DataTests
         var single = detector.Decide("b", LayoutCatalog.EnUs);
         Assert.True(single.Convert);
         Assert.Equal("и", single.ConvertedText);
+    }
+
+    [Theory]
+    [InlineData("ghb", "при")]
+    [InlineData("Ghb", "При")]
+    [InlineData(",e[ufknth", "бухгалтер")]
+    [InlineData(",e[ufknth,", "бухгалтер,")]
+    [InlineData("[kt,", "хлеб")]
+    [InlineData("GHB", null)]
+    [InlineData("nth", null)]
+    [InlineData("hello", null)]
+    [InlineData("example.com", null)]
+    [InlineData(",e[ufknth2", null)]
+    public void CompleteWord_WithRealDictionariesAndExceptions(string text, string? expected)
+    {
+        var resources = Assert.IsType<LanguageResources>(SharedAssets.Value);
+        Assert.True(resources.IsLoaded);
+
+        using var temp = new TempDir();
+        var paths = new AppPaths(temp.Path);
+        var logger = new AppLogger(paths, safeMode: true);
+        var exceptions = new ExceptionStore(paths, logger, resources);
+        var settings = new DetectionSettings();
+        var detector = new LayoutDetector(resources, LayoutPairRegistry.CreateDefault(), settings);
+        var engine = new CorrectionEngine(detector, settings, NullLearningStore.Instance, exceptions,
+            new PostProcessorPipeline(Array.Empty<IPostProcessor>()));
+
+        foreach (var ch in text)
+        {
+            Assert.True(LayoutCatalog.EnUs.TryGetKey(ch, out var virtualKey, out var shift));
+            Assert.Equal(KeyRole.WordChar, KeyClassifier.Classify(virtualKey, false, false, false, ch));
+            engine.AppendChar(new KeyStroke(virtualKey, shift, false), ch, LayoutCatalog.EnUsId);
+        }
+
+        var result = engine.CompleteWord(' ', terminatorAlreadyTyped: true);
+        if (expected is null)
+        {
+            Assert.Null(result.Plan);
+            return;
+        }
+
+        var plan = Assert.IsType<CorrectionPlan>(result.Plan);
+        Assert.Equal(CorrectionKind.LayoutSwitch, plan.Kind);
+        Assert.Equal(expected, plan.ReplacementText);
+        Assert.Equal(LayoutCatalog.RuRuId, plan.TargetLayoutId);
+        Assert.Equal(text.Length + 1, plan.DeleteCount);
+        Assert.Equal(' ', plan.Terminator);
+    }
+
+    [Fact]
+    public void DictionaryConflict_RespectsConfidenceAndEarlySwitch()
+    {
+        var resources = Assert.IsType<LanguageResources>(SharedAssets.Value);
+        Assert.True(resources.IsLoaded);
+        var settings = new DetectionSettings { ConfidenceThreshold = 3.0 };
+        var detector = new LayoutDetector(resources, LayoutPairRegistry.CreateDefault(), settings);
+
+        var cautious = detector.Decide("ghb", LayoutCatalog.EnUs);
+        Assert.False(cautious.Convert);
+        Assert.True(cautious.SourceInDictionary);
+        Assert.True(cautious.TargetInDictionary);
+
+        settings.ConfidenceThreshold = 2.0;
+        var early = detector.Decide("ghb", LayoutCatalog.EnUs, LayoutCatalog.RuRu, early: true);
+        Assert.False(early.Convert);
+
+        settings.UseFrequencyWeighting = false;
+        Assert.False(detector.Decide("ghb", LayoutCatalog.EnUs).Convert);
     }
 
     private static readonly Lazy<LanguageResources?> SharedAssets = new(() =>
