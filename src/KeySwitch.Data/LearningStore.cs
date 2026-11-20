@@ -1,14 +1,20 @@
+using System.Text.Json.Serialization;
 using KeySwitch.Core.Detect;
+using KeySwitch.Core.Layout;
 using KeySwitch.Core.Learning;
+using KeySwitch.Core.Text;
 
 namespace KeySwitch.Data;
 
-/// <summary>Статистика обучения по одному слову и направлению. Никакого текста и контекста — только счётчики.</summary>
+/// <summary>Статистика и подтверждённая замена для одного слова и направления.</summary>
 public sealed class WordLearningStats
 {
     public int UndoCount { get; set; }
 
     public int AcceptCount { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ConfirmedReplacement { get; set; }
 
     /// <summary>Слово перестало исправляться (порог отмен достигнут).</summary>
     public bool Suppressed { get; set; }
@@ -29,7 +35,7 @@ internal sealed class LearningData
 /// <summary>
 /// Самообучение: сколько раз пользователь отменял исправление слова и сколько раз принимал.
 /// По достижении порога слово подавляется и (если подключён <see cref="ExceptionStore"/>)
-/// добавляется в исключения. Хранятся только слово, направление и счётчики.
+/// добавляется в исключения. Ручные исправления запоминаются отдельно от автоматических.
 /// </summary>
 public sealed class LearningStore : ILearningStore
 {
@@ -102,25 +108,16 @@ public sealed class LearningStore : ILearningStore
 
     public void Save()
     {
-        LearningData data;
         lock (_lock)
         {
-            data = new LearningData
+            try
             {
-                Words = _stats.ToDictionary(
-                    pair => pair.Key,
-                    pair => pair.Value.Clone(),
-                    StringComparer.OrdinalIgnoreCase),
-            };
-        }
-
-        try
-        {
-            JsonFile.Write(_paths.LearningFile, data);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            _logger.Error("Не удалось сохранить файл обучения.", ex);
+                JsonFile.Write(_paths.LearningFile, new LearningData { Words = _stats });
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                _logger.Error("Не удалось сохранить файл обучения.", ex);
+            }
         }
     }
 
@@ -155,7 +152,7 @@ public sealed class LearningStore : ILearningStore
             return _stats.TryGetValue(key, out var stats) && stats.Suppressed;
     }
 
-    public void RecordUndo(string word, string sourceLayoutId, string targetLayoutId)
+    public void RecordUndo(string word, string sourceLayoutId, string targetLayoutId, bool keepOriginal = false)
     {
         if (!_settings.LearningEnabled)
             return;
@@ -177,9 +174,10 @@ public sealed class LearningStore : ILearningStore
             }
 
             stats.UndoCount++;
+            stats.ConfirmedReplacement = null;
             stats.LastSeen = DateTime.Now;
 
-            if (!stats.Suppressed && stats.UndoCount >= threshold)
+            if (!stats.Suppressed && (keepOriginal || stats.UndoCount >= threshold))
             {
                 stats.Suppressed = true;
                 suppress = true;
@@ -191,7 +189,8 @@ public sealed class LearningStore : ILearningStore
 
         if (suppress)
         {
-            _logger.Info($"Слово подавлено после {threshold} отмен (обучение).");
+            _logger.Info(keepOriginal ? "Пользователь подтвердил исходную раскладку слова." :
+                $"Слово подавлено после {threshold} отмен (обучение).");
             if (Exceptions is not null && direction is not null)
                 Exceptions.AddWord(word!, direction, fromLearning: true);
         }
@@ -199,13 +198,36 @@ public sealed class LearningStore : ILearningStore
         Save();
     }
 
-    public void RecordManualCorrection(string original, string corrected, string sourceLayoutId, string targetLayoutId)
+    public bool RecordManualCorrection(string original, string corrected, string sourceLayoutId, string targetLayoutId)
     {
-        if (!_settings.LearningEnabled)
-            return;
+        if (!_settings.LearningEnabled || !IsLearnablePair(original, corrected, sourceLayoutId, targetLayoutId))
+            return false;
 
-        // Ручная конвертация подтверждает, что исправление нужно: считаем это принятием.
-        RecordAcceptedWord(original, sourceLayoutId, targetLayoutId);
+        RecordAcceptedWord(original, sourceLayoutId, targetLayoutId, WordText.Normalize(corrected));
+        return true;
+    }
+
+    public bool TryGetManualCorrection(string word, string sourceLayoutId, string targetLayoutId, out string replacement)
+    {
+        replacement = string.Empty;
+        var key = MakeKey(word, sourceLayoutId, targetLayoutId);
+        if (!_settings.LearningEnabled || key == null)
+            return false;
+
+        lock (_lock)
+        {
+            if (!_stats.TryGetValue(key, out var stats) || stats.Suppressed ||
+                stats.ConfirmedReplacement is not { Length: > 0 } confirmed ||
+                !IsLearnablePair(word, confirmed, sourceLayoutId, targetLayoutId))
+            {
+                return false;
+            }
+
+            replacement = word.Any(char.IsUpper) && !word.Any(char.IsLower)
+                ? confirmed.ToUpperInvariant()
+                : char.IsUpper(word[0]) ? WordText.CapitalizeFirst(confirmed) : confirmed;
+            return true;
+        }
     }
 
     public void RecordAccepted(string word, string sourceLayoutId, string targetLayoutId)
@@ -230,7 +252,24 @@ public sealed class LearningStore : ILearningStore
         return normalized + "|" + direction;
     }
 
-    private void RecordAcceptedWord(string word, string sourceLayoutId, string targetLayoutId)
+    private static bool IsLearnablePair(string original, string corrected, string sourceLayoutId, string targetLayoutId)
+    {
+        if (original.Length is 0 or > 64 || corrected.Length is 0 or > 64 ||
+            LayoutCatalog.TryGet(sourceLayoutId) is not { } source ||
+            LayoutCatalog.TryGet(targetLayoutId) is not { } target || source.Language == target.Language)
+        {
+            return false;
+        }
+
+        var (targetCore, _) = WordText.SplitTrailingPunctuation(corrected);
+        Func<char, bool> sourceLetter = source.Language == "ru" ? WordText.IsCyrillicLetter : WordText.IsLatinLetter;
+        Func<char, bool> targetLetter = target.Language == "ru" ? WordText.IsCyrillicLetter : WordText.IsLatinLetter;
+        return original.Any(sourceLetter) && original.All(ch => sourceLetter(ch) || WordText.IsAmbiguousPunctuation(ch)) &&
+               targetCore.Any(targetLetter) && targetCore.All(ch => targetLetter(ch) || ch is '\'' or '’' or '-') &&
+               !corrected.Any(char.IsWhiteSpace);
+    }
+
+    private void RecordAcceptedWord(string word, string sourceLayoutId, string targetLayoutId, string? confirmed = null)
     {
         var key = MakeKey(word, sourceLayoutId, targetLayoutId);
         if (key is null)
@@ -245,6 +284,11 @@ public sealed class LearningStore : ILearningStore
             }
 
             stats.AcceptCount++;
+            if (confirmed != null)
+            {
+                stats.ConfirmedReplacement = confirmed;
+                stats.Suppressed = false;
+            }
             stats.LastSeen = DateTime.Now;
         }
 

@@ -13,6 +13,8 @@ public sealed class LayoutDetector
     private const int MinDictionaryFrequencyRatio = 100;
     private const int MinLengthForNgramCoverage = 5;
     private const double NgramCoverageThresholdFactor = 0.2;
+    private const double DictionaryContextFactor = 0.8;
+    private const double NgramContextFactor = 0.65;
 
     private readonly ILanguageResourcesProvider _resources;
     private readonly LayoutPairRegistry _pairs;
@@ -49,7 +51,8 @@ public sealed class LayoutDetector
             : Decide(text, source, target, early: false);
     }
 
-    public DetectionResult Decide(string text, LayoutTable source, LayoutTable target, bool early)
+    public DetectionResult Decide(string text, LayoutTable source, LayoutTable target, bool early,
+        string? contextLanguage = null)
     {
         var letterCount = CountLetters(text);
         if (letterCount == 1)
@@ -65,6 +68,7 @@ public sealed class LayoutDetector
         var sourceScore = sourceScorer.Score(text);
         var (core, tail) = WordText.SplitTrailingPunctuation(text);
         if (sourceScore.InDictionary && (early || !_settings.UseFrequencyWeighting ||
+            string.Equals(contextLanguage, source.Language, StringComparison.OrdinalIgnoreCase) ||
             source.Language != "en" || target.Language != "ru" || sourceScore.Frequency <= 0 ||
             !IsEnglishConsonantSequence(core)))
         {
@@ -113,19 +117,31 @@ public sealed class LayoutDetector
                 return DetectionResult.Keep(text, source.Id, "раннее переключение требует словарного слова", sourceScore.Total);
         }
 
+        var contextSupportsTarget = !early && !sourceScore.InDictionary && candidateScore.Penalty == 0 &&
+            string.Equals(contextLanguage, target.Language, StringComparison.OrdinalIgnoreCase);
+        if (candidateScore.InDictionary && contextSupportsTarget && delta < threshold &&
+            delta >= threshold * DictionaryContextFactor)
+        {
+            threshold *= DictionaryContextFactor;
+            interpretation += ", с учётом контекста";
+        }
+
         // Средние вероятности с общим floor слабо различают редкое слово и случайный
         // набор. Покрытие показывает, встречались ли сами сочетания букв в корпусе.
         // Если хвост допускает два прочтения, дополнительное правило не выбирает
         // между последней буквой и знаком препинания без словаря.
         var coverageThreshold = _settings.ConfidenceThreshold * _settings.NoDictionaryThresholdMultiplier *
                                 NgramCoverageThresholdFactor;
-        if (!candidateScore.InDictionary && delta < threshold && delta >= coverageThreshold &&
+        var contextualCoverageThreshold = contextSupportsTarget ? coverageThreshold * NgramContextFactor : coverageThreshold;
+        var ngramAdvantage = candidateScore.NgramPerChar - sourceScore.NgramPerChar;
+        if (!candidateScore.InDictionary && delta < threshold && delta >= contextualCoverageThreshold &&
             (tail.Length == 0 || string.Equals(fullText, coreText, StringComparison.Ordinal)) &&
-            candidateScore.Penalty == 0 && candidateScore.NgramPerChar - sourceScore.NgramPerChar >= coverageThreshold &&
+            candidateScore.Penalty == 0 && ngramAdvantage >= contextualCoverageThreshold &&
             HasStrongNgramCoverage(core, candidateText, source, sourceScorer, targetScorer))
         {
-            threshold = coverageThreshold;
-            interpretation = "характерные сочетания букв";
+            var needsContext = delta < coverageThreshold || ngramAdvantage < coverageThreshold;
+            threshold = needsContext ? contextualCoverageThreshold : coverageThreshold;
+            interpretation = needsContext ? "характерные сочетания букв и контекст" : "характерные сочетания букв";
         }
 
         var confidence = Sigmoid(delta - threshold);
@@ -134,6 +150,18 @@ public sealed class LayoutDetector
 
         return new DetectionResult(delta >= threshold, confidence, source.Id, target.Id, text, candidateText, reason,
             sourceScore.Total, candidateScore.Total, sourceScore.InDictionary, candidateScore.InDictionary);
+    }
+
+    internal string? GetKnownLanguage(string text)
+    {
+        var (word, _) = WordText.SplitTrailingPunctuation(text);
+        if (word.Length < 2 || word.Skip(1).Any(char.IsUpper))
+            return null;
+
+        var language = word.All(WordText.IsCyrillicLetter) ? "ru" : word.All(WordText.IsLatinLetter) ? "en" : null;
+        return language != null && _resources.GetDictionary(language)?.Contains(WordText.Normalize(word)) == true
+            ? language
+            : null;
     }
 
     private static bool HasStrongNgramCoverage(string original, string candidateText,

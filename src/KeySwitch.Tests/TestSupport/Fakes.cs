@@ -15,6 +15,7 @@ public sealed class FakeLearningStore : ILearningStore
     public HashSet<string> Suppressed { get; } = new(StringComparer.OrdinalIgnoreCase);
 
     public Dictionary<(string Word, string Source, string Target), int> UndoCounts { get; } = new();
+    private readonly Dictionary<(string Word, string Source, string Target), string> _confirmed = new();
 
     public int GetUndoCount(string word, string sourceLayoutId, string targetLayoutId)
         => UndoCounts.GetValueOrDefault((word, sourceLayoutId, targetLayoutId));
@@ -23,15 +24,28 @@ public sealed class FakeLearningStore : ILearningStore
         => Suppressed.Contains(word)
            || GetUndoCount(word, sourceLayoutId, targetLayoutId) >= 3;
 
-    public void RecordUndo(string word, string sourceLayoutId, string targetLayoutId)
+    public void RecordUndo(string word, string sourceLayoutId, string targetLayoutId, bool keepOriginal = false)
     {
         Undos.Add((word, sourceLayoutId, targetLayoutId));
         var key = (word, sourceLayoutId, targetLayoutId);
         UndoCounts[key] = GetUndoCount(word, sourceLayoutId, targetLayoutId) + 1;
+        _confirmed.Remove((word.ToLowerInvariant(), sourceLayoutId, targetLayoutId));
+        if (keepOriginal)
+            Suppressed.Add(word);
     }
 
-    public void RecordManualCorrection(string original, string corrected, string sourceLayoutId, string targetLayoutId)
-        => ManualCorrections.Add((original, corrected, sourceLayoutId, targetLayoutId));
+    public bool TryGetManualCorrection(string word, string sourceLayoutId, string targetLayoutId, out string replacement)
+    {
+        replacement = _confirmed.GetValueOrDefault((word.ToLowerInvariant(), sourceLayoutId, targetLayoutId)) ?? string.Empty;
+        return replacement.Length != 0;
+    }
+
+    public bool RecordManualCorrection(string original, string corrected, string sourceLayoutId, string targetLayoutId)
+    {
+        ManualCorrections.Add((original, corrected, sourceLayoutId, targetLayoutId));
+        _confirmed[(original.ToLowerInvariant(), sourceLayoutId, targetLayoutId)] = corrected;
+        return true;
+    }
 
     public void RecordAccepted(string word, string sourceLayoutId, string targetLayoutId)
         => Accepted.Add((word, sourceLayoutId, targetLayoutId));

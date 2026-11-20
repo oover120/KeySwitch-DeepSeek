@@ -21,7 +21,7 @@ public interface IExceptionPolicy
 }
 
 /// <summary>
-/// Самообучение. Хранятся только слова и счётчики — никакого текста набора и контекста.
+/// Самообучение по отдельным словам и подтверждённым заменам раскладки.
 /// </summary>
 public interface ILearningStore
 {
@@ -29,9 +29,11 @@ public interface ILearningStore
 
     bool IsSuppressed(string word, string sourceLayoutId, string targetLayoutId);
 
-    void RecordUndo(string word, string sourceLayoutId, string targetLayoutId);
+    void RecordUndo(string word, string sourceLayoutId, string targetLayoutId, bool keepOriginal = false);
 
-    void RecordManualCorrection(string original, string corrected, string sourceLayoutId, string targetLayoutId);
+    bool TryGetManualCorrection(string word, string sourceLayoutId, string targetLayoutId, out string replacement);
+
+    bool RecordManualCorrection(string original, string corrected, string sourceLayoutId, string targetLayoutId);
 
     void RecordAccepted(string word, string sourceLayoutId, string targetLayoutId);
 }
@@ -45,13 +47,17 @@ public sealed class NullLearningStore : ILearningStore
 
     public bool IsSuppressed(string word, string sourceLayoutId, string targetLayoutId) => false;
 
-    public void RecordUndo(string word, string sourceLayoutId, string targetLayoutId)
+    public void RecordUndo(string word, string sourceLayoutId, string targetLayoutId, bool keepOriginal = false)
     {
     }
 
-    public void RecordManualCorrection(string original, string corrected, string sourceLayoutId, string targetLayoutId)
+    public bool TryGetManualCorrection(string word, string sourceLayoutId, string targetLayoutId, out string replacement)
     {
+        replacement = string.Empty;
+        return false;
     }
+
+    public bool RecordManualCorrection(string original, string corrected, string sourceLayoutId, string targetLayoutId) => false;
 
     public void RecordAccepted(string word, string sourceLayoutId, string targetLayoutId)
     {

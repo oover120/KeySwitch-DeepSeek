@@ -31,6 +31,11 @@ public sealed class CorrectionEngine
     private WordToken? _lastWord;
     private char? _lastTerminator;
     private bool _lastTerminatorTyped;
+    private (string? Previous, string? Latest) _wordLanguages;
+    private (string? Previous, string? Latest) _languagesBeforeLastWord;
+    private (string Text, string LayoutId)? _erasedWord;
+    private int _charactersLeftToErase;
+    private int _spacesAfterUnchangedWord;
 
     public CorrectionEngine(
         LayoutDetector detector,
@@ -57,13 +62,62 @@ public sealed class CorrectionEngine
 
     public DetectionSettings Settings => _settings;
 
-    public void AppendChar(KeyStroke stroke, char character, string layoutId) => Buffer.Append(stroke, character, layoutId);
+    public void AppendChar(KeyStroke stroke, char character, string layoutId)
+    {
+        _spacesAfterUnchangedWord = 0;
+        if (Buffer.IsEmpty)
+            ClearUndo();
+        if (_charactersLeftToErase != 0)
+            ClearRetype();
+        Buffer.Append(stroke, character, layoutId);
+    }
 
-    public void Backspace() => Buffer.Backspace();
+    public void Backspace(bool wholeWord = false, bool trackRetype = true)
+    {
+        if (!trackRetype)
+            ClearRetype();
+        else if (!Buffer.IsEmpty && _charactersLeftToErase == 0)
+        {
+            _erasedWord = (Buffer.Text, Buffer.LayoutId);
+            _charactersLeftToErase = Buffer.Length;
+        }
+        else if (Buffer.IsEmpty && _spacesAfterUnchangedWord > 0 && _lastWord is { } last)
+        {
+            _erasedWord = (last.Text, last.LayoutId);
+            _charactersLeftToErase = last.Text.Length + _spacesAfterUnchangedWord;
+            _lastWord = null;
+        }
+        else if (Buffer.IsEmpty && _charactersLeftToErase == 0)
+            ClearRetype();
+
+        _spacesAfterUnchangedWord = 0;
+        if (wholeWord)
+        {
+            Buffer.Clear();
+            _charactersLeftToErase = 0;
+            ClearLanguageContext();
+        }
+        else
+        {
+            if (!Buffer.Backspace())
+                ClearLanguageContext();
+            if (_charactersLeftToErase > 0)
+                _charactersLeftToErase--;
+        }
+    }
+
+    /// <summary>Смена раскладки меняет клавиши, а текст и позиция ввода остаются прежними.</summary>
+    public void OnLayoutShortcut()
+    {
+        ClearLanguageContext();
+        ClearUndo();
+    }
 
     public void Reset(bool forgetLastWord = false)
     {
         Buffer.Clear();
+        ClearLanguageContext();
+        ClearRetype();
         if (!forgetLastWord)
             return;
 
@@ -102,15 +156,26 @@ public sealed class CorrectionEngine
         _lastTerminator = null;
         _lastTerminatorTyped = false;
         Buffer.Clear();
+        ClearLanguageContext();
+        ClearRetype();
         LastApplied = plan;
         return plan;
     }
 
     /// <summary>Завершение слова (пробел, Enter, Tab или ручная конвертация).</summary>
-    public EngineResult CompleteWord(char? terminator, bool terminatorAlreadyTyped)
+    public EngineResult CompleteWord(char? terminator, bool terminatorAlreadyTyped, bool automaticInput = true)
     {
+        if (!automaticInput || (Buffer.IsEmpty && EndsLanguageContext(terminator)))
+            ClearLanguageContext();
+
         if (Buffer.IsEmpty)
+        {
+            if (automaticInput && terminator == ' ' && _spacesAfterUnchangedWord > 0)
+                _spacesAfterUnchangedWord++;
+            else
+                ClearRetype();
             return EngineResult.Empty;
+        }
 
         var token = Buffer.ToToken();
         Buffer.Clear();
@@ -118,7 +183,23 @@ public sealed class CorrectionEngine
         _lastTerminator = terminator;
         _lastTerminatorTyped = terminatorAlreadyTyped;
 
-        var plan = BuildPlan(token, terminator, terminatorAlreadyTyped, manual: false, out var reason);
+        var reason = "автопереключение выключено";
+        CorrectionPlan? plan = null;
+        if (automaticInput)
+        {
+            if (TryLearnRetype(token))
+                reason = "запомнено ручное исправление раскладки";
+            else
+                plan = BuildPlan(token, terminator, terminatorAlreadyTyped, manual: false, out reason);
+
+            _languagesBeforeLastWord = _wordLanguages;
+            RememberWordLanguage(plan?.ReplacementText ?? token.Text, terminator);
+        }
+
+        ClearRetype();
+        if (automaticInput && plan == null && terminator == ' ')
+            _spacesAfterUnchangedWord = 1;
+
         if (plan == null)
         {
             // Последнее действие — «оставить как есть». Отменять нечего: иначе двойной Shift
@@ -134,6 +215,8 @@ public sealed class CorrectionEngine
     /// <summary>Ручная конвертация: текущий буфер, иначе последнее завершённое слово.</summary>
     public EngineResult ConvertManually()
     {
+        ClearLanguageContext();
+        ClearRetype();
         if (!Buffer.IsEmpty)
             return CompleteWord(null, false);
 
@@ -155,6 +238,8 @@ public sealed class CorrectionEngine
     /// </summary>
     public EngineResult ForceConvert()
     {
+        ClearLanguageContext();
+        ClearRetype();
         if (!Buffer.IsEmpty)
         {
             var current = Buffer.ToToken();
@@ -193,6 +278,8 @@ public sealed class CorrectionEngine
         if (!result.Convert)
             return null;
 
+        ClearLanguageContext();
+        ClearRetype();
         var plan = new CorrectionPlan(
             CorrectionKind.Selection,
             text,
@@ -210,7 +297,7 @@ public sealed class CorrectionEngine
     }
 
     /// <summary>Отмена последнего исправления. Возвращает план обратного исправления.</summary>
-    public bool TryUndo(out UndoPlan? plan)
+    public bool TryUndo(out UndoPlan? plan, bool confirmOriginal = false)
     {
         plan = null;
         if (LastApplied is not { } applied)
@@ -229,7 +316,11 @@ public sealed class CorrectionEngine
             currentLayout,
             applied.Terminator);
 
-        _learning.RecordUndo(applied.OriginalText, applied.SourceLayoutId, applied.TargetLayoutId);
+        _learning.RecordUndo(applied.OriginalText, applied.SourceLayoutId, applied.TargetLayoutId,
+            keepOriginal: confirmOriginal && applied.Kind == CorrectionKind.LayoutSwitch && applied.Terminator.HasValue);
+        ClearRetype();
+        _wordLanguages = _languagesBeforeLastWord;
+        RememberWordLanguage(applied.OriginalText, applied.Terminator);
         LastApplied = null;
         return true;
     }
@@ -261,7 +352,7 @@ public sealed class CorrectionEngine
 
         // Принудительная конвертация — сигнал «здесь должна быть другая раскладка»:
         // записываем как положительный пример, чтобы в следующий раз детектор справился сам.
-        _learning.RecordAccepted(token.Text.ToLowerInvariant(), detection.SourceLayoutId, detection.TargetLayoutId);
+        _learning.RecordManualCorrection(token.Text, plan.ReplacementText, detection.SourceLayoutId, detection.TargetLayoutId);
         return plan;
     }
 
@@ -288,10 +379,13 @@ public sealed class CorrectionEngine
         if (target == null)
             return null;
 
+        var learned = string.Empty;
         if (!manual)
         {
             var verdict = _exceptions.CheckWord(text, source.Id, target.Id);
-            if (verdict != WordVerdict.Allow)
+            var hasLearned = _learning.TryGetManualCorrection(text, source.Id, target.Id, out learned);
+            if (verdict != WordVerdict.Allow &&
+                !(hasLearned && verdict is WordVerdict.BlockedByLearning or WordVerdict.TooFrequent or WordVerdict.TooShort))
             {
                 reason = $"пропущено политикой исключений ({verdict})";
                 return null;
@@ -304,9 +398,17 @@ public sealed class CorrectionEngine
             }
         }
 
-        var detection = _detector.Decide(text, source, target, early: false);
-        reason = detection.Reason;
         var deleteCount = text.Length + (terminatorAlreadyTyped && terminator.HasValue ? 1 : 0);
+        if (learned.Length != 0)
+        {
+            reason = "подтверждённое ручное исправление";
+            return new CorrectionPlan(CorrectionKind.LayoutSwitch, text, learned, deleteCount, terminator,
+                source.Id, target.Id, 1.0, reason);
+        }
+
+        var contextLanguage = _wordLanguages.Latest == _wordLanguages.Previous ? _wordLanguages.Latest : null;
+        var detection = _detector.Decide(text, source, target, early: false, contextLanguage: contextLanguage);
+        reason = detection.Reason;
 
         // Терминатор печатается всегда, когда он известен: если клавиша была проглочена хуком,
         // её нужно напечатать самим, а если она уже дошла до окна — мы её удалили (DeleteCount + 1)
@@ -315,16 +417,23 @@ public sealed class CorrectionEngine
 
         if (detection.Convert)
         {
+            var replacement = detection.ConvertedText;
+            if (_postProcessors.TryCorrectConvertedWord(replacement, out var corrected))
+            {
+                replacement = corrected;
+                reason += ", исправлена опечатка";
+            }
+
             var plan = new CorrectionPlan(
                 CorrectionKind.LayoutSwitch,
                 text,
-                detection.ConvertedText,
+                replacement,
                 deleteCount,
                 terminatorToType,
                 source.Id,
                 target.Id,
                 detection.Confidence,
-                detection.Reason);
+                reason);
 
             _learning.RecordAccepted(text.ToLowerInvariant(), source.Id, target.Id);
             return plan;
@@ -353,6 +462,49 @@ public sealed class CorrectionEngine
             source.Id,
             1.0,
             $"постобработка {processorId}");
+    }
+
+    private bool TryLearnRetype(WordToken replacement)
+    {
+        if (_charactersLeftToErase != 0 || _erasedWord is not { } original ||
+            LayoutCatalog.TryGet(original.LayoutId) is not { } source ||
+            _detector.Pairs.GetAlternate(source) is not { } target ||
+            !string.Equals(target.Id, replacement.LayoutId, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var mapped = LayoutConverter.Convert(original.Text, source, target);
+        if (!string.Equals(mapped, replacement.Text, StringComparison.OrdinalIgnoreCase) &&
+            (!_postProcessors.TryCorrectConvertedWord(mapped, out var corrected) ||
+             !string.Equals(corrected, replacement.Text, StringComparison.OrdinalIgnoreCase)))
+        {
+            return false;
+        }
+
+        return _learning.RecordManualCorrection(original.Text, replacement.Text, source.Id, target.Id);
+    }
+
+    private void ClearRetype()
+    {
+        _erasedWord = null;
+        _charactersLeftToErase = 0;
+        _spacesAfterUnchangedWord = 0;
+    }
+
+    private void RememberWordLanguage(string text, char? terminator)
+    {
+        _wordLanguages = EndsLanguageContext(terminator) || text.EndsWith('.')
+            ? default
+            : (_wordLanguages.Latest, _detector.GetKnownLanguage(text));
+    }
+
+    private static bool EndsLanguageContext(char? terminator) => terminator is '\r' or '\n' or '\t' or '.' or '!' or '?';
+
+    private void ClearLanguageContext()
+    {
+        _wordLanguages = default;
+        _languagesBeforeLastWord = default;
     }
 
     private static int CountLetters(string text)

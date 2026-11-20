@@ -407,7 +407,7 @@ public sealed class AutoSwitchService : IDisposable
         if (vk is VkLShift or VkRShift)
         {
             _shiftDownAt = Environment.TickCount64;
-            _shiftHadOtherKey = false;
+            _shiftHadOtherKey = e.Ctrl || e.Alt || e.Win;
             return;
         }
 
@@ -437,6 +437,12 @@ public sealed class AutoSwitchService : IDisposable
         // это нужно, чтобы работала ручная конвертация последнего слова.
         bool auto = _settings.AutoSwitch && mode == ExceptionMode.Full;
 
+        if (vk == KeyClassifier.VkSpace && e.Win && !e.Ctrl && !e.Alt)
+        {
+            _engine.OnLayoutShortcut();
+            return;
+        }
+
         var role = KeyClassifier.Classify(vk, e.Ctrl, e.Alt, e.Win, e.Character);
         switch (role)
         {
@@ -449,9 +455,10 @@ public sealed class AutoSwitchService : IDisposable
                 return;
 
             case KeyRole.Backspace:
+            case KeyRole.WholeWordBackspace:
                 if (_engine.Buffer.IsEmpty)
                     _engine.ClearUndo();
-                _engine.Backspace();
+                _engine.Backspace(wholeWord: role == KeyRole.WholeWordBackspace, trackRetype: auto && !_passwordLike);
                 _hasPendingWord = !_engine.Buffer.IsEmpty;
                 return;
 
@@ -491,7 +498,12 @@ public sealed class AutoSwitchService : IDisposable
             // незнакомое слово, код, аббревиатура — человек знает лучше).
             _lastShiftTapAt = long.MinValue / 2;
             CancelSingleShiftSwitch();
-            if (!TryUndo("двойной Shift"))
+            var info = _tracker.Get();
+            if (ResolveMode(info) == ExceptionMode.Disabled || IsGameOrProtected(info) ||
+                _tracker.IsPasswordField(_settings.PasswordProtectionEnabled))
+                return;
+
+            if (!_engine.Buffer.IsEmpty || !TryUndo("двойной Shift", confirmOriginal: true))
                 ForceConvertLastWord("двойной Shift");
             return;
         }
@@ -574,7 +586,7 @@ public sealed class AutoSwitchService : IDisposable
         // Enter/Tab перехватываем: иначе они сработают в чужом окне до того, как мы исправим слово.
         // Терминатор известен всегда: если клавишу проглотили — её напечатает executor, если она уже
         // дошла до окна — движок добавил её к DeleteCount и вернёт вместе с исправленным словом.
-        var result = _engine.CompleteWord(terminator, terminatorAlreadyTyped: !swallowed);
+        var result = _engine.CompleteWord(terminator, terminatorAlreadyTyped: !swallowed, automaticInput: auto);
 
         _passwordLike = false;
         _hasPendingWord = false;
@@ -658,6 +670,7 @@ public sealed class AutoSwitchService : IDisposable
     private void ForceConvertLastWord(string reason)
     {
         var result = _engine.ForceConvert();
+        _hasPendingWord = !_engine.Buffer.IsEmpty;
         if (result.Plan is not { } plan)
         {
             _logger.Debug($"{reason}: принудительная конвертация не нужна ({result.Note ?? "нет слова"}).");
@@ -672,9 +685,9 @@ public sealed class AutoSwitchService : IDisposable
             $"символов={plan.OriginalText.Length} {plan.SourceLayoutId}->{plan.TargetLayoutId}");
     }
 
-    private bool TryUndo(string reason)
+    private bool TryUndo(string reason, bool confirmOriginal = false)
     {
-        if (!_engine.TryUndo(out var plan) || plan is null)
+        if (!_engine.TryUndo(out var plan, confirmOriginal) || plan is null)
         {
             _logger.Debug($"{reason}: отменять нечего.");
             return false;

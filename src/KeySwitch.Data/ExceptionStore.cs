@@ -82,6 +82,7 @@ public sealed class ExceptionStore : IExceptionPolicy
     private readonly AppPaths _paths;
     private readonly AppLogger _logger;
     private readonly HashSet<string> _wordLookup = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _learnedWordLookup = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, ExceptionMode> _processLookup = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, HashSet<string>> _topWords = new(StringComparer.OrdinalIgnoreCase);
     private LanguageResources? _resources;
@@ -272,6 +273,8 @@ public sealed class ExceptionStore : IExceptionPolicy
         {
             if (_wordLookup.Contains(WordKey(core, direction)) || _wordLookup.Contains(WordKey(core, DirectionBoth)))
                 return WordVerdict.BlockedByUser;
+            if (_learnedWordLookup.Contains(WordKey(core, direction)) || _learnedWordLookup.Contains(WordKey(core, DirectionBoth)))
+                return WordVerdict.BlockedByLearning;
         }
 
         if (IsFrequentWord(core, source) || IsFrequentWord(core, target))
@@ -363,7 +366,7 @@ public sealed class ExceptionStore : IExceptionPolicy
 
             if (existing is not null)
             {
-                existing.FromLearning |= fromLearning;
+                existing.FromLearning &= fromLearning;
                 RebuildIndexesLocked();
             }
             else
@@ -546,6 +549,7 @@ public sealed class ExceptionStore : IExceptionPolicy
     private void RebuildIndexesLocked()
     {
         _wordLookup.Clear();
+        _learnedWordLookup.Clear();
         _processLookup.Clear();
 
         foreach (var word in Words)
@@ -556,7 +560,8 @@ public sealed class ExceptionStore : IExceptionPolicy
 
             word.Word = normalized;
             word.Direction = NormalizeDirection(word.Direction);
-            _wordLookup.Add(WordKey(normalized, word.Direction));
+            var lookup = word.FromLearning ? _learnedWordLookup : _wordLookup;
+            lookup.Add(WordKey(normalized, word.Direction));
         }
 
         foreach (var rule in Processes)

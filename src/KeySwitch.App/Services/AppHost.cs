@@ -90,7 +90,8 @@ public sealed class AppHost : IDisposable
             detectionSettings,
             new SettingsAwareLearningStore(_learning, _settings),
             _exceptions,
-            new PostProcessorPipeline(processors));
+            new PostProcessorPipeline(processors,
+                new ToggleablePostProcessor(new MissingLetterCorrector(_languageProvider), () => _settings.TyposEnabled)));
 
         _hook = new KeyboardHook();
         _sender = new InputSender();

@@ -66,6 +66,20 @@ public class CorrectionEngineTests
     }
 
     [Fact]
+    public void CompleteWord_AppliesConfiguredTypoAfterLayoutSwitch_AndKeepsPunctuation()
+    {
+        var typos = new FakeTypoDictionary();
+        typos.Map["привет"] = "приветик";
+        var engine = CreateEngine(postProcessors: new PostProcessorPipeline(new[] { new TypoCorrector(typos) }));
+        Type(engine, "ghbdtn,", LayoutCatalog.EnUsId);
+
+        var plan = Assert.IsType<CorrectionPlan>(engine.CompleteWord(' ', terminatorAlreadyTyped: true).Plan);
+
+        Assert.Equal(CorrectionKind.LayoutSwitch, plan.Kind);
+        Assert.Equal("приветик, ", plan.TextToType);
+    }
+
+    [Fact]
     public void CompleteWord_TerminatorNotTyped_TextToTypeContainsTerminator()
     {
         // Контракт (docs/CONTRACTS.md:209 и :226): при CompleteWord(ch, false) Hooks глушит клавишу

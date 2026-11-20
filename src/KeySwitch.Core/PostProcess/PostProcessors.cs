@@ -127,8 +127,13 @@ public sealed class YoFixer : IPostProcessor
 public sealed class PostProcessorPipeline
 {
     private readonly List<IPostProcessor> _processors = new();
+    private readonly IPostProcessor? _missingLetterCorrector;
 
-    public PostProcessorPipeline(IEnumerable<IPostProcessor> processors) => _processors.AddRange(processors);
+    public PostProcessorPipeline(IEnumerable<IPostProcessor> processors, IPostProcessor? missingLetterCorrector = null)
+    {
+        _processors.AddRange(processors);
+        _missingLetterCorrector = missingLetterCorrector;
+    }
 
     public IReadOnlyList<IPostProcessor> Processors => _processors;
 
@@ -147,6 +152,28 @@ public sealed class PostProcessorPipeline
 
         result = word;
         processorId = string.Empty;
+        return false;
+    }
+
+    public bool TryCorrectConvertedWord(string word, out string result)
+    {
+        var (core, tail) = WordText.SplitTrailingPunctuation(word);
+        foreach (var processor in _processors)
+        {
+            if (processor.Id == "typo" && processor.TryProcess(core, out var replacement))
+            {
+                result = replacement + tail;
+                return true;
+            }
+        }
+
+        if (_missingLetterCorrector?.TryProcess(core, out var inferred) == true)
+        {
+            result = inferred + tail;
+            return true;
+        }
+
+        result = word;
         return false;
     }
 }

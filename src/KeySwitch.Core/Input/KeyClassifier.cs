@@ -12,6 +12,7 @@ public enum KeyRole
     Terminator,
 
     Backspace,
+    WholeWordBackspace,
     Reset,
     Ignore
 }
@@ -46,11 +47,21 @@ public static class KeyClassifier
     public const int VkDelete = 0x2E;
     public const int VkLWin = 0x5B;
     public const int VkRWin = 0x5C;
+    private const int VkLShift = 0xA0;
+    private const int VkRShift = 0xA1;
+    private const int VkLControl = 0xA2;
+    private const int VkRControl = 0xA3;
+    private const int VkLMenu = 0xA4;
+    private const int VkRMenu = 0xA5;
 
     public static KeyRole Classify(int virtualKey, bool ctrl, bool alt, bool win, char? character)
     {
-        if (virtualKey is VkShift or VkControl or VkMenu or VkCapital or VkLWin or VkRWin)
+        if (virtualKey is VkShift or VkLShift or VkRShift or VkControl or VkLControl or VkRControl or
+            VkMenu or VkLMenu or VkRMenu or VkCapital or VkLWin or VkRWin)
             return KeyRole.Ignore;
+
+        if (virtualKey == VkBack && ctrl && !alt && !win)
+            return KeyRole.WholeWordBackspace;
 
         if (ctrl || alt || win)
             return KeyRole.Reset;

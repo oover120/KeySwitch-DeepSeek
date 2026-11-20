@@ -7,6 +7,7 @@ using KeySwitch.Core.Layout;
 using KeySwitch.Core.Learning;
 using KeySwitch.Core.PostProcess;
 using KeySwitch.Data;
+using KeySwitch.Tests.TestSupport;
 using Xunit;
 
 namespace KeySwitch.Tests;
@@ -149,6 +150,122 @@ public class DataTests
     }
 
     [Fact]
+    public void LearningStore_ReusesOnlyConfirmedLayoutCorrections_AfterRestart()
+    {
+        using var temp = new TempDir();
+        var paths = new AppPaths(temp.Path);
+        var logger = new AppLogger(paths, safeMode: true);
+        var settings = new AppSettings();
+        var store = new LearningStore(paths, logger, settings);
+        const string en = LayoutCatalog.EnUsId;
+        const string ru = LayoutCatalog.RuRuId;
+
+        store.RecordAccepted("ghbdtn", en, ru);
+        Assert.False(store.TryGetManualCorrection("ghbdtn", en, ru, out _));
+        Assert.False(store.RecordManualCorrection("ghbdtn vbh", "привет мир", en, ru));
+        Assert.True(store.RecordManualCorrection("ghbdtn", "привет", en, ru));
+
+        store = new LearningStore(paths, logger, settings);
+        store.Load();
+        Assert.True(store.TryGetManualCorrection("Ghbdtn", en, ru, out var titleCase));
+        Assert.Equal("Привет", titleCase);
+        Assert.False(store.TryGetManualCorrection("ghbdtn", ru, en, out _));
+        settings.LearningEnabled = false;
+        Assert.False(store.TryGetManualCorrection("ghbdtn", en, ru, out _));
+        settings.LearningEnabled = true;
+        store.RecordUndo("ghbdtn", en, ru);
+        Assert.False(store.TryGetManualCorrection("ghbdtn", en, ru, out _));
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public void CompleteWord_LearnsWhenEntireWordIsErasedAndRetypedInOtherLayout(bool afterSpaces, bool wholeWord)
+    {
+        using var temp = new TempDir();
+        var paths = new AppPaths(temp.Path);
+        var logger = new AppLogger(paths, safeMode: true);
+        var store = new LearningStore(paths, logger, new AppSettings());
+        var settings = new DetectionSettings { ConfidenceThreshold = 100 };
+        var engine = new CorrectionEngine(TestEnvironment.CreateDetector(settings), settings, store,
+            new ExceptionStore(paths, logger, null), new PostProcessorPipeline(Array.Empty<IPostProcessor>()));
+        const string typed = "ghbdtn";
+
+        AppendInput(engine, typed, LayoutCatalog.EnUsId);
+        if (afterSpaces)
+        {
+            Assert.False(engine.CompleteWord(' ', terminatorAlreadyTyped: true).HasPlan);
+            engine.CompleteWord(' ', terminatorAlreadyTyped: true);
+        }
+
+        engine.OnLayoutShortcut();
+        if (wholeWord)
+            engine.Backspace(wholeWord: true);
+        else
+        {
+            for (var i = 0; i < typed.Length + (afterSpaces ? 2 : 0); i++)
+                engine.Backspace();
+        }
+
+        engine.OnLayoutShortcut();
+        var retyped = CompleteInput(engine, "привет", LayoutCatalog.RuRuId);
+        Assert.False(retyped.HasPlan);
+        Assert.Contains("запомнено", retyped.Note);
+
+        var learned = CompleteInput(engine, typed, LayoutCatalog.EnUsId);
+        Assert.Equal("привет ", learned.Plan?.TextToType);
+    }
+
+    [Fact]
+    public void CompleteWord_DoesNotLearnFromUnrelatedRetypeOrAnotherWindow()
+    {
+        var learning = new FakeLearningStore();
+        var settings = new DetectionSettings { ConfidenceThreshold = 100 };
+        var engine = new CorrectionEngine(TestEnvironment.CreateDetector(settings), settings, learning,
+            NullExceptionPolicy.Instance, new PostProcessorPipeline(Array.Empty<IPostProcessor>()));
+
+        AppendInput(engine, "ghbdtn", LayoutCatalog.EnUsId);
+        engine.Backspace(wholeWord: true);
+        CompleteInput(engine, "добрый", LayoutCatalog.RuRuId);
+        Assert.Empty(learning.ManualCorrections);
+
+        AppendInput(engine, "ghbdtn", LayoutCatalog.EnUsId);
+        engine.Backspace(wholeWord: true);
+        engine.Reset(forgetLastWord: true);
+        CompleteInput(engine, "привет", LayoutCatalog.RuRuId);
+        Assert.Empty(learning.ManualCorrections);
+    }
+
+    [Fact]
+    public void ForceConvert_ConfirmsFutureSwitch_AndDoubleShiftUndoKeepsOriginal()
+    {
+        using var temp = new TempDir();
+        var paths = new AppPaths(temp.Path);
+        var logger = new AppLogger(paths, safeMode: true);
+        var exceptions = new ExceptionStore(paths, logger, null);
+        var store = new LearningStore(paths, logger, new AppSettings(), exceptions);
+        var settings = new DetectionSettings { ConfidenceThreshold = 100 };
+        var engine = new CorrectionEngine(TestEnvironment.CreateDetector(settings), settings, store,
+            exceptions, new PostProcessorPipeline(Array.Empty<IPostProcessor>()));
+        const string en = LayoutCatalog.EnUsId;
+        const string ru = LayoutCatalog.RuRuId;
+
+        Assert.False(CompleteInput(engine, "ghbdtn", en).HasPlan);
+        Assert.Equal("привет ", engine.ForceConvert().Plan?.TextToType);
+        Assert.Equal("привет ", CompleteInput(engine, "ghbdtn", en).Plan?.TextToType);
+        Assert.True(engine.TryUndo(out var undo, confirmOriginal: true));
+        Assert.Equal("ghbdtn ", undo!.TextToType);
+        Assert.Equal(WordVerdict.BlockedByLearning, exceptions.CheckWord("ghbdtn", en, ru));
+        Assert.False(CompleteInput(engine, "ghbdtn", en).HasPlan);
+
+        Assert.Equal("привет ", engine.ForceConvert().Plan?.TextToType);
+        Assert.Equal("привет ", CompleteInput(engine, "ghbdtn", en).Plan?.TextToType);
+        exceptions.AddWord("ghbdtn", ExceptionStore.DirectionEnRu);
+        Assert.False(CompleteInput(engine, "ghbdtn", en).HasPlan);
+    }
+
+    [Fact]
     public void LanguageResources_RealAssets_LoadAndDetect()
     {
         // Интеграционный тест: при отсутствии собранных ассетов не падаем, а пропускаем.
@@ -215,14 +332,7 @@ public class DataTests
         var engine = new CorrectionEngine(detector, settings, NullLearningStore.Instance, exceptions,
             new PostProcessorPipeline(Array.Empty<IPostProcessor>()));
 
-        foreach (var ch in text)
-        {
-            Assert.True(LayoutCatalog.EnUs.TryGetKey(ch, out var virtualKey, out var shift));
-            Assert.Equal(KeyRole.WordChar, KeyClassifier.Classify(virtualKey, false, false, false, ch));
-            engine.AppendChar(new KeyStroke(virtualKey, shift, false), ch, LayoutCatalog.EnUsId);
-        }
-
-        var result = engine.CompleteWord(' ', terminatorAlreadyTyped: true);
+        var result = CompleteInput(engine, text, LayoutCatalog.EnUsId);
         if (expected is null)
         {
             Assert.Null(result.Plan);
@@ -235,6 +345,97 @@ public class DataTests
         Assert.Equal(LayoutCatalog.RuRuId, plan.TargetLayoutId);
         Assert.Equal(text.Length + 1, plan.DeleteCount);
         Assert.Equal(' ', plan.Terminator);
+    }
+
+    [Theory]
+    [InlineData(true, "хорошая!")]
+    [InlineData(false, "хрошая!")]
+    public void CompleteWord_CorrectsMissingLetterAfterLayoutSwitch_WhenEnabled(bool correctTypos, string expected)
+    {
+        var resources = Assert.IsType<LanguageResources>(SharedAssets.Value);
+        using var temp = new TempDir();
+        var paths = new AppPaths(temp.Path);
+        var logger = new AppLogger(paths, safeMode: true);
+        var settings = new DetectionSettings();
+        var engine = new CorrectionEngine(new LayoutDetector(resources, LayoutPairRegistry.CreateDefault(), settings),
+            settings, NullLearningStore.Instance, new ExceptionStore(paths, logger, resources),
+            new PostProcessorPipeline(Array.Empty<IPostProcessor>(), correctTypos ? new MissingLetterCorrector(resources) : null));
+
+        const string typed = "[hjifz";
+        var result = CompleteInput(engine, typed, LayoutCatalog.EnUsId, '!');
+        var plan = Assert.IsType<CorrectionPlan>(result.Plan);
+        Assert.Equal(CorrectionKind.LayoutSwitch, plan.Kind);
+        Assert.Equal(LayoutCatalog.RuRuId, plan.TargetLayoutId);
+        Assert.Equal(expected, plan.TextToType);
+        Assert.Equal(typed.Length + 1, plan.DeleteCount);
+        Assert.True(engine.TryUndo(out var undo));
+        Assert.Equal(typed + "!", undo!.TextToType);
+        Assert.Equal(expected.Length, undo.DeleteCount);
+    }
+
+    [Fact]
+    public void CompleteWord_UsesTwoKnownWordsAsContext_AndDropsItAcrossBoundaries()
+    {
+        var resources = Assert.IsType<LanguageResources>(SharedAssets.Value);
+        var settings = new DetectionSettings();
+        var engine = new CorrectionEngine(new LayoutDetector(resources, LayoutPairRegistry.CreateDefault(), settings),
+            settings, NullLearningStore.Instance, NullExceptionPolicy.Instance,
+            new PostProcessorPipeline(Array.Empty<IPostProcessor>()));
+
+        const string typed = "ффкргы";
+        Assert.Null(CompleteInput(engine, typed, LayoutCatalog.RuRuId).Plan);
+        CompleteInput(engine, "we", LayoutCatalog.EnUsId);
+        Assert.Null(CompleteInput(engine, typed, LayoutCatalog.RuRuId).Plan);
+        CompleteInput(engine, "we", LayoutCatalog.EnUsId);
+        CompleteInput(engine, "visited", LayoutCatalog.EnUsId);
+        var withContext = Assert.IsType<CorrectionPlan>(CompleteInput(engine, typed, LayoutCatalog.RuRuId).Plan);
+        Assert.Equal("aarhus", withContext.ReplacementText);
+        Assert.Contains("контекст", withContext.Reason);
+
+        CompleteInput(engine, "we", LayoutCatalog.EnUsId);
+        CompleteInput(engine, "visited", LayoutCatalog.EnUsId, '\t');
+        Assert.Null(CompleteInput(engine, typed, LayoutCatalog.RuRuId).Plan);
+
+        CompleteInput(engine, "we", LayoutCatalog.EnUsId);
+        CompleteInput(engine, "visited", LayoutCatalog.EnUsId);
+        engine.Reset(forgetLastWord: true);
+        Assert.Null(CompleteInput(engine, typed, LayoutCatalog.RuRuId).Plan);
+
+        CompleteInput(engine, "we", LayoutCatalog.EnUsId);
+        CompleteInput(engine, "visited", LayoutCatalog.EnUsId);
+        engine.Backspace();
+        Assert.Null(CompleteInput(engine, typed, LayoutCatalog.RuRuId).Plan);
+    }
+
+    [Fact]
+    public void CompleteWord_KeepsValidEnglishWordsInRussianContext()
+    {
+        var resources = Assert.IsType<LanguageResources>(SharedAssets.Value);
+        var settings = new DetectionSettings();
+        var engine = new CorrectionEngine(new LayoutDetector(resources, LayoutPairRegistry.CreateDefault(), settings),
+            settings, NullLearningStore.Instance, NullExceptionPolicy.Instance,
+            new PostProcessorPipeline(Array.Empty<IPostProcessor>()));
+
+        CompleteInput(engine, "сегодня", LayoutCatalog.RuRuId);
+        CompleteInput(engine, "открыли", LayoutCatalog.RuRuId);
+        Assert.Null(CompleteInput(engine, "GitHub", LayoutCatalog.EnUsId).Plan);
+    }
+
+    private static EngineResult CompleteInput(CorrectionEngine engine, string text, string layoutId, char terminator = ' ')
+    {
+        AppendInput(engine, text, layoutId);
+        return engine.CompleteWord(terminator, terminatorAlreadyTyped: true);
+    }
+
+    private static void AppendInput(CorrectionEngine engine, string text, string layoutId)
+    {
+        var layout = LayoutCatalog.TryGet(layoutId)!;
+        foreach (var ch in text)
+        {
+            Assert.True(layout.TryGetKey(ch, out var virtualKey, out var shift));
+            Assert.Equal(KeyRole.WordChar, KeyClassifier.Classify(virtualKey, false, false, false, ch));
+            engine.AppendChar(new KeyStroke(virtualKey, shift, false), ch, layoutId);
+        }
     }
 
     [Theory]

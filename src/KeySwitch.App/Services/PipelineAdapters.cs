@@ -26,17 +26,20 @@ internal sealed class SettingsAwareLearningStore : ILearningStore
     public bool IsSuppressed(string word, string sourceLayoutId, string targetLayoutId)
         => _settings.LearningEnabled && _inner.IsSuppressed(word, sourceLayoutId, targetLayoutId);
 
-    public void RecordUndo(string word, string sourceLayoutId, string targetLayoutId)
+    public void RecordUndo(string word, string sourceLayoutId, string targetLayoutId, bool keepOriginal = false)
     {
         if (_settings.LearningEnabled)
-            _inner.RecordUndo(word, sourceLayoutId, targetLayoutId);
+            _inner.RecordUndo(word, sourceLayoutId, targetLayoutId, keepOriginal);
     }
 
-    public void RecordManualCorrection(string original, string corrected, string sourceLayoutId, string targetLayoutId)
+    public bool TryGetManualCorrection(string word, string sourceLayoutId, string targetLayoutId, out string replacement)
     {
-        if (_settings.LearningEnabled)
-            _inner.RecordManualCorrection(original, corrected, sourceLayoutId, targetLayoutId);
+        replacement = string.Empty;
+        return _settings.LearningEnabled && _inner.TryGetManualCorrection(word, sourceLayoutId, targetLayoutId, out replacement);
     }
+
+    public bool RecordManualCorrection(string original, string corrected, string sourceLayoutId, string targetLayoutId)
+        => _settings.LearningEnabled && _inner.RecordManualCorrection(original, corrected, sourceLayoutId, targetLayoutId);
 
     public void RecordAccepted(string word, string sourceLayoutId, string targetLayoutId)
     {

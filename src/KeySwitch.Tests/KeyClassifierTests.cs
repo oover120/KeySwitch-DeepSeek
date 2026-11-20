@@ -39,6 +39,10 @@ public class KeyClassifierTests
     public void Backspace(int vk, char? ch)
         => Assert.Equal(KeyRole.Backspace, KeyClassifier.Classify(vk, false, false, false, ch));
 
+    [Fact]
+    public void CtrlBackspace_DeletesAWholeWord()
+        => Assert.Equal(KeyRole.WholeWordBackspace, KeyClassifier.Classify(KeyClassifier.VkBack, true, false, false, null));
+
     [Theory]
     [InlineData(KeyClassifier.VkEscape, null)]
     [InlineData(KeyClassifier.VkHome, null)]
