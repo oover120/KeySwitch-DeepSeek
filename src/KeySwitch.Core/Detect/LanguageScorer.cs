@@ -35,6 +35,25 @@ public sealed class LanguageScorer
 
     public string Language => _dictionary.Language;
 
+    internal (double Trigrams, double Quadgrams) GetNgramCoverage(string word)
+        => (GetNgramCoverage(word, _trigrams), GetNgramCoverage(word, _quadgrams));
+
+    private static double GetNgramCoverage(string word, ICharNgramModel model)
+    {
+        if (model.Order <= 0)
+            return 0;
+
+        var total = 0;
+        var observed = 0;
+        NgramHasher.ForEachGram(word, model.Order, hash =>
+        {
+            total++;
+            if (model.HasGramHash(hash))
+                observed++;
+        });
+        return total > 0 ? (double)observed / total : 0;
+    }
+
     public WordScore Score(string text)
     {
         if (string.IsNullOrWhiteSpace(text))

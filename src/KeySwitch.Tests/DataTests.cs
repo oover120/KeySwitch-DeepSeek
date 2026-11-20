@@ -187,11 +187,19 @@ public class DataTests
     [InlineData("Ghb", "При")]
     [InlineData(",e[ufknth", "бухгалтер")]
     [InlineData(",e[ufknth,", "бухгалтер,")]
+    [InlineData("jge,kbreq", "опубликуй")]
+    [InlineData("jge,kbreq,", "опубликуй,")]
+    [InlineData("pfievtk", "зашумел")]
+    [InlineData("pfievtk,", null)]
+    [InlineData("ckf;tyyjq", "слаженной")]
     [InlineData("[kt,", "хлеб")]
     [InlineData("GHB", null)]
     [InlineData("nth", null)]
     [InlineData("hello", null)]
     [InlineData("example.com", null)]
+    [InlineData("readme.txt", null)]
+    [InlineData("Pfievtk", "Зашумел")]
+    [InlineData("PFIEVTK", null)]
     [InlineData(",e[ufknth2", null)]
     public void CompleteWord_WithRealDictionariesAndExceptions(string text, string? expected)
     {
@@ -227,6 +235,30 @@ public class DataTests
         Assert.Equal(LayoutCatalog.RuRuId, plan.TargetLayoutId);
         Assert.Equal(text.Length + 1, plan.DeleteCount);
         Assert.Equal(' ', plan.Terminator);
+    }
+
+    [Theory]
+    [InlineData("pfievtk", "зашумел", LayoutCatalog.EnUsId)]
+    [InlineData("зщвсфыеукы", "podcasters", LayoutCatalog.RuRuId)]
+    public void UnknownWord_IsConvertedWithStrongNgramCoverage(string text, string expected, string layoutId)
+    {
+        var resources = Assert.IsType<LanguageResources>(SharedAssets.Value);
+        Assert.True(resources.IsLoaded);
+        var settings = new DetectionSettings();
+        var detector = new LayoutDetector(resources, LayoutPairRegistry.CreateDefault(), settings);
+        var source = LayoutCatalog.TryGet(layoutId)!;
+        var target = detector.Pairs.GetAlternate(source)!;
+
+        var result = detector.Decide(text, source);
+        Assert.True(result.Convert, result.Reason);
+        Assert.Equal(expected, result.ConvertedText);
+        Assert.False(result.SourceInDictionary);
+        Assert.False(result.TargetInDictionary);
+
+        Assert.False(detector.Decide(text, source, target, early: true).Convert);
+
+        settings.NoDictionaryThresholdMultiplier = 5.0;
+        Assert.False(detector.Decide(text, source).Convert);
     }
 
     [Fact]

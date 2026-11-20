@@ -11,6 +11,8 @@ namespace KeySwitch.Core.Detect;
 public sealed class LayoutDetector
 {
     private const int MinDictionaryFrequencyRatio = 100;
+    private const int MinLengthForNgramCoverage = 5;
+    private const double NgramCoverageThresholdFactor = 0.2;
 
     private readonly ILanguageResourcesProvider _resources;
     private readonly LayoutPairRegistry _pairs;
@@ -111,12 +113,51 @@ public sealed class LayoutDetector
                 return DetectionResult.Keep(text, source.Id, "раннее переключение требует словарного слова", sourceScore.Total);
         }
 
+        // Средние вероятности с общим floor слабо различают редкое слово и случайный
+        // набор. Покрытие показывает, встречались ли сами сочетания букв в корпусе.
+        // Если хвост допускает два прочтения, дополнительное правило не выбирает
+        // между последней буквой и знаком препинания без словаря.
+        var coverageThreshold = _settings.ConfidenceThreshold * _settings.NoDictionaryThresholdMultiplier *
+                                NgramCoverageThresholdFactor;
+        if (!candidateScore.InDictionary && delta < threshold && delta >= coverageThreshold &&
+            (tail.Length == 0 || string.Equals(fullText, coreText, StringComparison.Ordinal)) &&
+            candidateScore.Penalty == 0 && candidateScore.NgramPerChar - sourceScore.NgramPerChar >= coverageThreshold &&
+            HasStrongNgramCoverage(core, candidateText, source, sourceScorer, targetScorer))
+        {
+            threshold = coverageThreshold;
+            interpretation = "характерные сочетания букв";
+        }
+
         var confidence = Sigmoid(delta - threshold);
         var reason = $"{interpretation}: Δ={delta:F2} (порог {threshold:F2}), " +
                      $"A={sourceScore.Total:F2}, B={candidateScore.Total:F2}";
 
         return new DetectionResult(delta >= threshold, confidence, source.Id, target.Id, text, candidateText, reason,
             sourceScore.Total, candidateScore.Total, sourceScore.InDictionary, candidateScore.InDictionary);
+    }
+
+    private static bool HasStrongNgramCoverage(string original, string candidateText,
+        LayoutTable source, LanguageScorer sourceScorer, LanguageScorer targetScorer)
+    {
+        var (candidate, _) = WordText.SplitTrailingPunctuation(candidateText);
+        if (candidate.Length < MinLengthForNgramCoverage || candidate.Length != original.Length ||
+            !candidate.All(char.IsLetter))
+        {
+            return false;
+        }
+
+        // Сравниваем одни и те же клавиши. Смешанный регистр характерен для
+        // идентификаторов и сокращений.
+        if (original.Skip(1).Any(char.IsUpper) || !LayoutConverter.CanConvert(original, source))
+            return false;
+
+        var targetCoverage = targetScorer.GetNgramCoverage(candidate);
+        if (targetCoverage.Trigrams < 0.85 || targetCoverage.Quadgrams < 0.60)
+            return false;
+
+        var sourceCoverage = sourceScorer.GetNgramCoverage(original);
+        return targetCoverage.Trigrams - sourceCoverage.Trigrams >= 0.25 &&
+               targetCoverage.Quadgrams - sourceCoverage.Quadgrams >= 0.50;
     }
 
     private static bool IsEnglishConsonantSequence(string core)

@@ -111,6 +111,7 @@ public sealed class AutoSwitchService : IDisposable
     private IntPtr _singleShiftWindow;
     private int _singleShiftPending;
 
+    private IntPtr _inputWindow;
     private bool _passwordLike;
     private volatile bool _started;
     private volatile bool _hasPendingWord;
@@ -356,6 +357,19 @@ public sealed class AutoSwitchService : IDisposable
 
     private void ProcessKey(KeyWorkItem item)
     {
+        if (item.IsKeyDown || item.VirtualKey is VkLShift or VkRShift)
+        {
+            var window = WindowInspector.GetForegroundHandle();
+            if (window != _inputWindow)
+            {
+                _inputWindow = window;
+                ResetState(forgetLastWord: true);
+                _shiftDownAt = 0;
+                _lastShiftTapAt = long.MinValue / 2;
+                CancelSingleShiftSwitch();
+            }
+        }
+
         switch (item.Kind)
         {
             case KeyWorkKind.PauseHotkey:
@@ -864,9 +878,9 @@ public sealed class AutoSwitchService : IDisposable
         SwitchLayoutNow(_singleShiftWindow);
     }
 
-    private void ResetState()
+    private void ResetState(bool forgetLastWord = false)
     {
-        _engine.Reset();
+        _engine.Reset(forgetLastWord);
         _passwordLike = false;
         _hasPendingWord = false;
     }

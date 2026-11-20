@@ -61,9 +61,16 @@ public sealed class CorrectionEngine
 
     public void Backspace() => Buffer.Backspace();
 
-    public void Reset()
+    public void Reset(bool forgetLastWord = false)
     {
         Buffer.Clear();
+        if (!forgetLastWord)
+            return;
+
+        _lastWord = null;
+        _lastTerminator = null;
+        _lastTerminatorTyped = false;
+        LastApplied = null;
     }
 
     /// <summary>Раннее срабатывание: проверка текущего недописанного слова.</summary>
@@ -111,13 +118,13 @@ public sealed class CorrectionEngine
         _lastTerminator = terminator;
         _lastTerminatorTyped = terminatorAlreadyTyped;
 
-        var plan = BuildPlan(token, terminator, terminatorAlreadyTyped, manual: false);
+        var plan = BuildPlan(token, terminator, terminatorAlreadyTyped, manual: false, out var reason);
         if (plan == null)
         {
             // Последнее действие — «оставить как есть». Отменять нечего: иначе двойной Shift
             // откатил бы исправление, сделанное несколькими словами раньше.
             LastApplied = null;
-            return new EngineResult(token, null, null);
+            return new EngineResult(token, null, reason);
         }
 
         LastApplied = plan;
@@ -133,7 +140,7 @@ public sealed class CorrectionEngine
         if (_lastWord == null)
             return EngineResult.Empty;
 
-        var plan = BuildPlan(_lastWord, _lastTerminator, _lastTerminatorTyped, manual: true);
+        var plan = BuildPlan(_lastWord, _lastTerminator, _lastTerminatorTyped, manual: true, out _);
         if (plan == null)
             return new EngineResult(_lastWord, null, "конвертация не требуется");
 
@@ -258,8 +265,10 @@ public sealed class CorrectionEngine
         return plan;
     }
 
-    private CorrectionPlan? BuildPlan(WordToken token, char? terminator, bool terminatorAlreadyTyped, bool manual)
+    private CorrectionPlan? BuildPlan(WordToken token, char? terminator, bool terminatorAlreadyTyped, bool manual,
+        out string reason)
     {
+        reason = "нет пары раскладок";
         var source = LayoutCatalog.TryGet(token.LayoutId);
         if (source == null)
             return null;
@@ -270,7 +279,10 @@ public sealed class CorrectionEngine
         // Одиночную букву проверяет отдельное правило детектора («b» → «и»), поэтому общий
         // порог минимальной длины к ней не применяется.
         if (letterCount != 1 && letterCount < _settings.MinWordLength)
+        {
+            reason = "слово слишком короткое";
             return null;
+        }
 
         var target = _detector.Pairs.GetAlternate(source);
         if (target == null)
@@ -280,13 +292,20 @@ public sealed class CorrectionEngine
         {
             var verdict = _exceptions.CheckWord(text, source.Id, target.Id);
             if (verdict != WordVerdict.Allow)
+            {
+                reason = $"пропущено политикой исключений ({verdict})";
                 return null;
+            }
 
             if (_learning.IsSuppressed(text.ToLowerInvariant(), source.Id, target.Id))
+            {
+                reason = "пропущено по истории отмен";
                 return null;
+            }
         }
 
         var detection = _detector.Decide(text, source, target, early: false);
+        reason = detection.Reason;
         var deleteCount = text.Length + (terminatorAlreadyTyped && terminator.HasValue ? 1 : 0);
 
         // Терминатор печатается всегда, когда он известен: если клавиша была проглочена хуком,

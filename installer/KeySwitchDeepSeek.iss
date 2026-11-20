@@ -7,12 +7,12 @@
 ; Сборка установщика: Inno Setup 6 → Compile, или
 ;   "%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" installer\KeySwitchDeepSeek.iss
 ; Версию можно передать снаружи, чтобы не править файл на каждый релиз:
-;   ISCC.exe /DMyAppVersion=1.2.5 installer\KeySwitchDeepSeek.iss
+;   ISCC.exe /DMyAppVersion=1.2.6 installer\KeySwitchDeepSeek.iss
 ; Перед этим должен быть выполнен publish.ps1 (incoming файлы в artifacts\publish).
 
 #define MyAppName "KeySwitch DeepSeek"
 #ifndef MyAppVersion
-  #define MyAppVersion "1.2.5"
+  #define MyAppVersion "1.2.6"
 #endif
 #define MyAppPublisher "oover120"
 #define MyAppExeName "KeySwitchDeepSeek.exe"
@@ -41,7 +41,9 @@ UninstallDisplayIcon={app}\{#MyAppExeName}
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
-; Если приложение запущено — установщик предложит его закрыть.
+; Мьютексы из SingleInstance.cs позволяют обнаружить запущенный KeySwitch до замены EXE,
+; в том числе когда Restart Manager не может закрыть экземпляр с повышенными правами.
+AppMutex=KeySwitchDeepSeek.SingleInstance.Global,KeySwitchDeepSeek.SingleInstance.Session,KeySwitchDeepSeek.SingleInstance.Local
 CloseApplications=yes
 RestartApplications=no
 UninstallDisplayName={cm:AppName}
@@ -54,6 +56,10 @@ VersionInfoDescription={#MyAppName} Setup
 [Languages]
 Name: "russian"; MessagesFile: "compiler:Languages\Russian.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
+
+[Messages]
+russian.SetupAppRunningError=Приложение %1 запущено.%n%nНажмите правой кнопкой на значке KeySwitch в области уведомлений и выберите «Выход». Затем нажмите «ОК», чтобы продолжить установку.
+english.SetupAppRunningError=%1 is running.%n%nRight-click the KeySwitch icon in the notification area and select Exit. Then click OK to continue setup.
 
 [CustomMessages]
 russian.AppName=KeySwitch DeepSeek — переключение раскладки

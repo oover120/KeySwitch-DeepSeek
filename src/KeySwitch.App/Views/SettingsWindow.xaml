@@ -17,8 +17,9 @@
         SnapsToDevicePixels="True">
 
     <Window.Title>
-        <MultiBinding StringFormat="{}{0} — {1}">
+        <MultiBinding StringFormat="{}{0} {1} — {2}">
             <Binding Path="[app.name]" Source="{x:Static loc:Loc.Instance}" />
+            <Binding Path="VersionText" />
             <Binding Path="[settings.title]" Source="{x:Static loc:Loc.Instance}" />
         </MultiBinding>
     </Window.Title>
@@ -58,14 +59,8 @@
                                        VerticalAlignment="Center" />
                         </Border>
                         <TextBlock Style="{DynamicResource TitleTextStyle}"
-                                   Margin="10,0,0,0">
-                            <TextBlock.Text>
-                                <MultiBinding StringFormat="{}{0} — {1}">
-                                    <Binding Path="[app.name]" Source="{x:Static loc:Loc.Instance}" />
-                                    <Binding Path="[settings.title]" Source="{x:Static loc:Loc.Instance}" />
-                                </MultiBinding>
-                            </TextBlock.Text>
-                        </TextBlock>
+                                   Margin="10,0,0,0"
+                                   Text="{Binding Title, RelativeSource={RelativeSource AncestorType=Window}}" />
                     </StackPanel>
 
                     <Button x:Name="CloseButton"

@@ -108,7 +108,7 @@ public class CorrectionEngineTests
         Assert.Null(result.Plan);
         Assert.NotNull(result.Word);
         Assert.Equal("привет", result.Word!.Text);
-        Assert.Null(result.Note);
+        Assert.Equal("слово есть в словаре исходного языка", result.Note);
         Assert.False(engine.CanUndo);
         Assert.Empty(learning.Accepted);
     }
@@ -147,6 +147,7 @@ public class CorrectionEngineTests
         var automatic = engine.CompleteWord(null, terminatorAlreadyTyped: false);
 
         Assert.False(automatic.HasPlan);
+        Assert.Contains(nameof(WordVerdict.BlockedByUser), automatic.Note);
         Assert.Single(exceptions.CheckedWords);
         Assert.Equal("ghbdtn", exceptions.CheckedWords[0]);
 
@@ -529,6 +530,22 @@ public class CorrectionEngineTests
 
         Assert.True(engine.Buffer.IsEmpty);
         Assert.Same(EngineResult.Empty, engine.CompleteWord(null, terminatorAlreadyTyped: false));
+    }
+
+    [Fact]
+    public void ResetForNewWindow_DropsUnfinishedWordAndPreviousCorrection()
+    {
+        var engine = CreateEngine();
+        Type(engine, "ghbdtn", LayoutCatalog.EnUsId);
+        Assert.True(engine.CompleteWord(' ', terminatorAlreadyTyped: true).HasPlan);
+        Type(engine, "abcd", LayoutCatalog.EnUsId);
+
+        engine.Reset(forgetLastWord: true);
+
+        Assert.True(engine.Buffer.IsEmpty);
+        Assert.False(engine.CanUndo);
+        Assert.Null(engine.LastWord);
+        Assert.Same(EngineResult.Empty, engine.ForceConvert());
     }
 
     [Fact]
