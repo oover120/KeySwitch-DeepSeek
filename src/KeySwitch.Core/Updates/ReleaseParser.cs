@@ -8,6 +8,9 @@ namespace KeySwitch.Core.Updates;
 /// </summary>
 public static class ReleaseParser
 {
+    private const string DownloadRoot = "https://github.com/oover120/KeySwitch-DeepSeek/releases/download";
+    private const long MaxInstallerSize = 256 * 1024 * 1024;
+
     /// <summary>
     /// Разбирает JSON релиза и сравнивает с <paramref name="current"/>.
     /// Ошибка разбора возвращается в <see cref="UpdateInfo.Error"/>, исключений наружу нет.
@@ -56,12 +59,50 @@ public static class ReleaseParser
                 downloadUrl ?? releaseUrl,
                 releaseUrl,
                 TrimNotes(notes),
-                null);
+                null)
+            {
+                Installer = hasUpdate ? FindInstaller(root, tag, latest.ToString(3)) : null,
+            };
         }
-        catch (JsonException ex)
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException)
         {
             return UpdateInfo.Failure(ex.Message);
         }
+    }
+
+    private static UpdatePackage? FindInstaller(JsonElement root, string? tag, string version)
+    {
+        if (tag != $"v{version}" ||
+            (root.TryGetProperty("draft", out JsonElement draft) && draft.ValueKind != JsonValueKind.False) ||
+            (root.TryGetProperty("prerelease", out JsonElement prerelease) && prerelease.ValueKind != JsonValueKind.False) ||
+            !root.TryGetProperty("assets", out JsonElement assets) || assets.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        string name = $"KeySwitchDeepSeek-{version}-setup.exe";
+        string url = $"{DownloadRoot}/{tag}/{name}";
+
+        foreach (JsonElement asset in assets.EnumerateArray())
+        {
+            if (asset.ValueKind != JsonValueKind.Object ||
+                ReadString(asset, "name") != name || ReadString(asset, "state") != "uploaded" ||
+                ReadString(asset, "browser_download_url") != url ||
+                !asset.TryGetProperty("size", out JsonElement sizeElement) || sizeElement.ValueKind != JsonValueKind.Number ||
+                !sizeElement.TryGetInt64(out long size) || size <= 0 || size > MaxInstallerSize)
+            {
+                continue;
+            }
+
+            string? digest = ReadString(asset, "digest");
+            if (digest is { Length: 71 } && digest.StartsWith("sha256:", StringComparison.Ordinal) &&
+                digest[7..].All(Uri.IsHexDigit))
+            {
+                return new UpdatePackage(new Uri(url), size, digest[7..]);
+            }
+        }
+
+        return null;
     }
 
     /// <summary>«v1.2.1» → Version(1.2.1); суффиксы вроде «-beta» отбрасываются.</summary>
@@ -112,18 +153,14 @@ public static class ReleaseParser
 
         foreach (JsonElement asset in assets.EnumerateArray())
         {
-            string? name = asset.TryGetProperty("name", out JsonElement nameElement)
-                ? nameElement.GetString()
-                : null;
+            string? name = ReadString(asset, "name");
 
             if (name is null || !name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
 
-            string? url = asset.TryGetProperty("browser_download_url", out JsonElement urlElement)
-                ? urlElement.GetString()
-                : null;
+            string? url = ReadString(asset, "browser_download_url");
 
             if (!string.IsNullOrEmpty(url))
             {
@@ -133,6 +170,10 @@ public static class ReleaseParser
 
         return null;
     }
+
+    private static string? ReadString(JsonElement element, string name) =>
+        element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out JsonElement value) &&
+        value.ValueKind == JsonValueKind.String ? value.GetString() : null;
 
     /// <summary>Сравниваем только major.minor.patch: ревизия сборки не влияет.</summary>
     private static Version Normalize(Version version) =>

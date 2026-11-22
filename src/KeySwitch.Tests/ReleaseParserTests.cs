@@ -21,6 +21,20 @@ public sealed class ReleaseParserTests
         }
         """;
 
+    private const string InstallerUrl = "https://github.com/oover120/KeySwitch-DeepSeek/releases/download/v1.2.8/KeySwitchDeepSeek-1.2.8-setup.exe";
+    private const string Digest = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+    private static readonly string InstallerRelease = $$"""
+        {
+          "tag_name": "v1.2.8", "draft": false, "prerelease": false,
+          "assets": [
+            { "name": "KeySwitchDeepSeek.exe", "browser_download_url": "https://example.test/KeySwitchDeepSeek.exe" },
+            { "name": "KeySwitchDeepSeek-1.2.8-setup.exe", "state": "uploaded", "size": 50000000,
+              "browser_download_url": "{{InstallerUrl}}", "digest": "sha256:{{Digest}}" }
+          ]
+        }
+        """;
+
     [Fact]
     public void Parse_NewerRelease_ReportsUpdate()
     {
@@ -63,6 +77,35 @@ public sealed class ReleaseParserTests
 
         Assert.Equal("https://example.test/KeySwitchDeepSeek.exe", info.DownloadUrl);
         Assert.Equal("https://github.com/oover120/KeySwitch-DeepSeek/releases/tag/v1.2.1", info.ReleaseUrl);
+    }
+
+    [Fact]
+    public void Parse_SelectsOfficialInstallerEvenWhenPortableExeComesFirst()
+    {
+        UpdateInfo info = ReleaseParser.Parse(InstallerRelease, new Version(1, 2, 7));
+
+        Assert.Equal(new UpdatePackage(new Uri(InstallerUrl), 50_000_000, Digest), info.Installer);
+        Assert.Null(ReleaseParser.Parse(InstallerRelease, new Version(1, 2, 8)).Installer);
+    }
+
+    [Theory]
+    [InlineData(InstallerUrl, "https://github.com.example.test/oover120/KeySwitch-DeepSeek/releases/download/v1.2.8/KeySwitchDeepSeek-1.2.8-setup.exe")]
+    [InlineData("/download/v1.2.8/", "/download/v1.2.7/")]
+    [InlineData("\"v1.2.8\"", "\"v1.2.8-beta\"")]
+    [InlineData("\"prerelease\": false", "\"prerelease\": true")]
+    [InlineData("\"draft\": false", "\"draft\": true")]
+    [InlineData("uploaded", "starter")]
+    [InlineData("50000000", "0")]
+    [InlineData("50000000", "999999999")]
+    [InlineData("sha256:" + Digest, "invalid")]
+    public void Parse_RejectedInstallerLeavesManualDownloadAvailable(string original, string replacement)
+    {
+        string release = InstallerRelease.Replace(original, replacement, StringComparison.Ordinal);
+
+        UpdateInfo info = ReleaseParser.Parse(release, new Version(1, 2, 7));
+
+        Assert.True(info.HasUpdate);
+        Assert.Null(info.Installer);
     }
 
     [Fact]

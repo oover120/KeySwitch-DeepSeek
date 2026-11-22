@@ -62,6 +62,7 @@ public sealed class AppHost : IDisposable
         _exceptions = new ExceptionStore(_paths, _logger, resources: null);
         _exceptions.Load();
         _learning = new LearningStore(_paths, _logger, _settings, _exceptions);
+        _learning.Load();
         _typos = new TypoDictionary(_paths, _logger);
         _yo = new YoDictionary(_logger);
 
@@ -130,10 +131,13 @@ public sealed class AppHost : IDisposable
         _tray.SettingsRequested += (_, _) => OpenSettings();
         _tray.ExceptionsRequested += (_, _) => OpenSettings();
         _tray.ExitRequested += (_, _) => System.Windows.Application.Current?.Shutdown();
-        _tray.UpdateRequested += (_, _) => UpdateService.CheckInBackground(_logger.Info);
+        _tray.UpdateRequested += (_, _) => CheckForUpdates();
     }
 
     public AppSettings Settings => _settings;
+
+    private void CheckForUpdates() => UpdateService.CheckInBackground(_logger.Info,
+        (title, text) => _tray.ShowBalloon(title, text));
 
     /// <summary>Трей для уведомлений (например, если хук не удалось запустить).</summary>
     public TrayService Tray => _tray;
@@ -285,7 +289,8 @@ public sealed class AppHost : IDisposable
         {
             if (_settingsViewModel is null)
             {
-                _settingsViewModel = new SettingsViewModel(_settings, _exceptions, _learning, _paths, _logger);
+                _settingsViewModel = new SettingsViewModel(
+                    _settings, _exceptions, _learning, _paths, _logger, CheckForUpdates);
                 _settingsViewModel.Saved += OnSettingsSaved;
             }
             else

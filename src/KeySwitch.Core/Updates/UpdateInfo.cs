@@ -12,6 +12,8 @@ public sealed record UpdateInfo(
     string? Notes,
     string? Error)
 {
+    public UpdatePackage? Installer { get; init; }
+
     /// <summary>Проверка не удалась: сети нет, ответ не разобрался, таймаут.</summary>
     public static UpdateInfo Failure(string error) => new(false, null, null, null, null, error);
 }

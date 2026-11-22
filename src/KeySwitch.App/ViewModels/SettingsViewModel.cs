@@ -83,7 +83,8 @@ public sealed class SettingsViewModel : ViewModelBase
         ExceptionStore exceptions,
         LearningStore learning,
         AppPaths paths,
-        AppLogger logger)
+        AppLogger logger,
+        Action checkForUpdates)
     {
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
         _exceptions = exceptions ?? throw new ArgumentNullException(nameof(exceptions));
@@ -119,7 +120,7 @@ public sealed class SettingsViewModel : ViewModelBase
         RemoveTypoCommand = new RelayCommand(parameter => RemoveTypo(parameter as TypoRow));
         OpenDataFolderCommand = new RelayCommand(OpenDataFolder);
         OpenReadmeCommand = new RelayCommand(OpenReadme);
-        CheckUpdatesCommand = new RelayCommand(() => UpdateService.CheckInBackground(null));
+        CheckUpdatesCommand = new RelayCommand(checkForUpdates);
 
         _licensesRaw = LoadLicenses();
         VersionText = ReadVersion();

@@ -7,15 +7,16 @@
 ; Сборка установщика: Inno Setup 6 → Compile, или
 ;   "%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" installer\KeySwitchDeepSeek.iss
 ; Версию можно передать снаружи, чтобы не править файл на каждый релиз:
-;   ISCC.exe /DMyAppVersion=1.2.7 installer\KeySwitchDeepSeek.iss
+;   ISCC.exe /DMyAppVersion=1.2.8 installer\KeySwitchDeepSeek.iss
 ; Перед этим должен быть выполнен publish.ps1 (incoming файлы в artifacts\publish).
 
 #define MyAppName "KeySwitch DeepSeek"
 #ifndef MyAppVersion
-  #define MyAppVersion "1.2.7"
+  #define MyAppVersion "1.2.8"
 #endif
 #define MyAppPublisher "oover120"
 #define MyAppExeName "KeySwitchDeepSeek.exe"
+; Preserve the published AppId, including both closing braces.
 #define MyAppId "{{3C9F1A72-5B4D-4E88-9A17-6D2B8E4F1C93}}"
 
 [Setup]
@@ -30,7 +31,7 @@ DisableProgramGroupPage=yes
 AllowNoIcons=yes
 ; Установка только для текущего пользователя, повышение прав не требуется.
 PrivilegesRequired=lowest
-PrivilegesRequiredOverridesAllowed=dialog
+PrivilegesRequiredOverridesAllowed=dialog commandline
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0
@@ -70,6 +71,10 @@ russian.DesktopIcon=Создать ярлык на рабочем столе
 english.DesktopIcon=Create a desktop shortcut
 russian.LaunchApp=Запустить KeySwitch DeepSeek
 english.LaunchApp=Launch KeySwitch DeepSeek
+russian.UpdateTitle=Обновление KeySwitch DeepSeek до {#MyAppVersion}
+english.UpdateTitle=Updating KeySwitch DeepSeek to {#MyAppVersion}
+russian.UpdateWaitFailed=KeySwitch не завершился. Закройте его через меню значка в области уведомлений и запустите обновление снова.
+english.UpdateWaitFailed=KeySwitch did not exit. Close it from its notification area menu and try updating again.
 
 [Tasks]
 Name: "autostart"; Description: "{cm:AutostartTask}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
@@ -86,10 +91,11 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Comment: 
 [Registry]
 ; Автозапуск через HKCU\...\Run — без планировщика и без прав администратора.
 ; Значение совпадает с тем, что пишет ElevationHelper.SetRunKeyAutostart.
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "KeySwitchDeepSeek"; ValueData: """{app}\{#MyAppExeName}"""; Flags: uninsdeletevalue; Tasks: autostart
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "KeySwitchDeepSeek"; ValueData: """{app}\{#MyAppExeName}"""; Flags: uninsdeletevalue; Tasks: autostart; Check: IsManualInstall
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchApp}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchApp}"; Flags: nowait postinstall skipifsilent; Check: IsManualInstall
+Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; Flags: nowait runasoriginaluser; Check: IsOnlineUpdate
 
 [UninstallDelete]
 ; Папка установки после удаления файлов может остаться пустой — убираем её.
@@ -99,6 +105,58 @@ Type: filesandordirs; Name: "{app}"
 ; при переустановке они должны остаться.
 
 [Code]
+var
+  OnlineUpdate: Boolean;
+
+function OpenProcess(Access: LongWord; InheritHandle: Boolean; ProcessId: LongWord): THandle;
+  external 'OpenProcess@kernel32.dll stdcall';
+function WaitForSingleObject(Handle: THandle; Milliseconds: LongWord): LongWord;
+  external 'WaitForSingleObject@kernel32.dll stdcall';
+function CloseHandle(Handle: THandle): Boolean;
+  external 'CloseHandle@kernel32.dll stdcall';
+
+function InitializeSetup: Boolean;
+var
+  ProcessId: Integer;
+  AppProcess: THandle;
+begin
+  Result := True;
+  ProcessId := StrToIntDef(ExpandConstant('{param:KeySwitchPid|}'), 0);
+  OnlineUpdate := ProcessId > 0;
+  if not OnlineUpdate then
+    Exit;
+
+  { InitializeSetup runs before AppMutex. Wait for KeySwitch to finish shutdown
+    and release its EXE. If it has already exited, the mutex check still runs. }
+  AppProcess := OpenProcess($00100000, False, ProcessId); { SYNCHRONIZE }
+  if AppProcess <> 0 then
+  begin
+    try
+      Result := WaitForSingleObject(AppProcess, 30000) = 0; { WAIT_OBJECT_0 }
+    finally
+      CloseHandle(AppProcess);
+    end;
+    if not Result then
+      MsgBox(ExpandConstant('{cm:UpdateWaitFailed}'), mbError, MB_OK);
+  end;
+end;
+
+function IsOnlineUpdate: Boolean;
+begin
+  Result := OnlineUpdate;
+end;
+
+procedure InitializeWizard;
+begin
+  if OnlineUpdate then
+    WizardForm.Caption := ExpandConstant('{cm:UpdateTitle}');
+end;
+
+function IsManualInstall: Boolean;
+begin
+  Result := not OnlineUpdate;
+end;
+
 { Автозапуск мог включить сам пользователь уже после установки, поэтому значение
   HKCU\...\Run удаляем всегда, независимо от выбранной при установке галочки. }
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);

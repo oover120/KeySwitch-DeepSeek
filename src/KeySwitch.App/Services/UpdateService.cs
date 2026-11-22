@@ -11,10 +11,19 @@ namespace KeySwitch.App.Services;
 /// </summary>
 public static class UpdateService
 {
+    private static int _running;
+
     /// <summary>Запускает проверку в фоне; <paramref name="log"/> получает строку для журнала.</summary>
-    public static void CheckInBackground(Action<string>? log)
+    public static void CheckInBackground(Action<string>? log, Action<string, string> notify)
     {
-        var thread = new Thread(() => Run(log))
+        if (Interlocked.Exchange(ref _running, 1) != 0)
+            return;
+
+        var thread = new Thread(() =>
+        {
+            try { Run(log, notify); }
+            finally { Interlocked.Exchange(ref _running, 0); }
+        })
         {
             IsBackground = true,
             Name = "KeySwitch.UpdateCheck",
@@ -24,7 +33,7 @@ public static class UpdateService
         thread.Start();
     }
 
-    private static void Run(Action<string>? log)
+    private static void Run(Action<string>? log, Action<string, string> notify)
     {
         Version current = UpdateChecker.CurrentVersion;
         UpdateInfo info;
@@ -54,10 +63,10 @@ public static class UpdateService
             }
         }
 
-        Show(info, current);
+        Show(info, current, log, notify);
     }
 
-    private static void Show(UpdateInfo info, Version current)
+    private static void Show(UpdateInfo info, Version current, Action<string>? log, Action<string, string> notify)
     {
         string title = Loc.T("update.title");
 
@@ -81,15 +90,37 @@ public static class UpdateService
             return;
         }
 
-        MessageBoxResult answer = MessageBox.Show(
-            Loc.Format("update.available", info.LatestVersion, current.ToString(3)),
-            title,
-            MessageBoxButton.YesNo,
-            MessageBoxImage.Question);
-
-        if (answer == MessageBoxResult.Yes)
+        try
         {
-            UpdateChecker.OpenDownloadPage(info.DownloadUrl ?? UpdateChecker.ReleasesPage);
+            UpdatePackage? package = info.Installer;
+            InstalledUpdate? installed = package is null ? null : InstalledUpdate.Find();
+            string prompt = installed is null ? "update.available" : "update.install";
+            MessageBoxResult answer = MessageBox.Show(
+                Loc.Format(prompt, info.LatestVersion, current.ToString(3)),
+                title, MessageBoxButton.YesNo, MessageBoxImage.Question);
+            if (answer != MessageBoxResult.Yes)
+                return;
+
+            if (installed is null || package is null)
+            {
+                UpdateChecker.OpenDownloadPage();
+                return;
+            }
+
+            notify(title, Loc.Format("update.downloading", info.LatestVersion));
+            installed.DownloadAndStartAsync(package).GetAwaiter().GetResult();
+            log?.Invoke($"Запущено обновление до {info.LatestVersion}.");
+            var application = System.Windows.Application.Current;
+            application.Dispatcher.Invoke(() => application.Shutdown());
+        }
+        catch (Exception ex)
+        {
+            log?.Invoke($"Не удалось запустить обновление: {ex.Message}");
+            string reason = ex is OperationCanceledException ? Loc.T("update.timeout") : ex.Message;
+            MessageBoxResult answer = MessageBox.Show(Loc.Format("update.installFailed", reason),
+                title, MessageBoxButton.YesNo, MessageBoxImage.Warning);
+            if (answer == MessageBoxResult.Yes)
+                UpdateChecker.OpenDownloadPage();
         }
     }
 }

@@ -48,11 +48,11 @@ public static class UpdateChecker
     }
 
     /// <summary>Открывает страницу загрузки в браузере по умолчанию.</summary>
-    public static void OpenDownloadPage(string url)
+    public static void OpenDownloadPage()
     {
         try
         {
-            Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+            using Process? browser = Process.Start(new ProcessStartInfo(ReleasesPage) { UseShellExecute = true });
         }
         catch
         {
