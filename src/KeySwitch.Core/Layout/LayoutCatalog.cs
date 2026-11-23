@@ -41,18 +41,21 @@ public static class LayoutCatalog
         return null;
     }
 
+    // Windows reserves the ASCII codes '0' through '9' for the number-row virtual keys.
+    private static KeyDef NumberRowKey(char digit, char shifted) => new(digit, digit, shifted);
+
     private static LayoutTable BuildEnUs() => LayoutTable.Create(EnUsId, "English (US)", "en", new[]
     {
-        new KeyDef(0x30, '1', '!'),
-        new KeyDef(0x31, '2', '@'),
-        new KeyDef(0x32, '3', '#'),
-        new KeyDef(0x33, '4', '$'),
-        new KeyDef(0x34, '5', '%'),
-        new KeyDef(0x35, '6', '^'),
-        new KeyDef(0x36, '7', '&'),
-        new KeyDef(0x37, '8', '*'),
-        new KeyDef(0x38, '9', '('),
-        new KeyDef(0x39, '0', ')'),
+        NumberRowKey('0', ')'),
+        NumberRowKey('1', '!'),
+        NumberRowKey('2', '@'),
+        NumberRowKey('3', '#'),
+        NumberRowKey('4', '$'),
+        NumberRowKey('5', '%'),
+        NumberRowKey('6', '^'),
+        NumberRowKey('7', '&'),
+        NumberRowKey('8', '*'),
+        NumberRowKey('9', '('),
         new KeyDef(0x41, 'a', 'A'),
         new KeyDef(0x42, 'b', 'B'),
         new KeyDef(0x43, 'c', 'C'),
@@ -99,16 +102,16 @@ public static class LayoutCatalog
     /// </summary>
     private static LayoutTable BuildRuRu() => LayoutTable.Create(RuRuId, "Русская (ЙЦУКЕН)", "ru", new[]
     {
-        new KeyDef(0x30, '1', '!'),
-        new KeyDef(0x31, '2', '"'),
-        new KeyDef(0x32, '3', '№'),
-        new KeyDef(0x33, '4', ';'),
-        new KeyDef(0x34, '5', '%'),
-        new KeyDef(0x35, '6', ':'),
-        new KeyDef(0x36, '7', '?'),
-        new KeyDef(0x37, '8', '*'),
-        new KeyDef(0x38, '9', '('),
-        new KeyDef(0x39, '0', ')'),
+        NumberRowKey('0', ')'),
+        NumberRowKey('1', '!'),
+        NumberRowKey('2', '"'),
+        NumberRowKey('3', '№'),
+        NumberRowKey('4', ';'),
+        NumberRowKey('5', '%'),
+        NumberRowKey('6', ':'),
+        NumberRowKey('7', '?'),
+        NumberRowKey('8', '*'),
+        NumberRowKey('9', '('),
         new KeyDef(0x51, 'й', 'Й'),
         new KeyDef(0x57, 'ц', 'Ц'),
         new KeyDef(0x45, 'у', 'У'),

@@ -9,7 +9,7 @@ public class KeyClassifierTests
     [InlineData((int)'A', 'a')]
     [InlineData((int)'Z', 'z')]
     [InlineData(0x31, '1')]
-    [InlineData(0x39, '0')]
+    [InlineData(0x30, '0')]
     [InlineData(0xDB, '[')]
     [InlineData(0xDD, ']')]
     [InlineData(0xBA, ';')]

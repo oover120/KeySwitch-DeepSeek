@@ -95,6 +95,27 @@ public class ForceConvertTests
     }
 
     [Theory]
+    [InlineData(LayoutCatalog.RuRuId, "ащт1", "fon1")]
+    [InlineData(LayoutCatalog.EnUsId, "fon1", "ащт1")]
+    public void ForceConvert_PhysicalNumberKey_PreservesTheDigit(string layoutId, string original, string expected)
+    {
+        var engine = CreateEngine();
+        var layout = LayoutCatalog.TryGet(layoutId)!;
+        foreach (int key in "FON1")
+        {
+            Assert.True(layout.TryMap(key, shift: false, out char character));
+            engine.AppendChar(new KeyStroke(key, false, false), character, layoutId);
+        }
+
+        var plan = Assert.IsType<CorrectionPlan>(engine.ForceConvert().Plan);
+        Assert.Equal(expected, plan.TextToType);
+        Assert.Equal(original, plan.OriginalText);
+        Assert.Equal(4, plan.DeleteCount);
+        Assert.True(engine.TryUndo(out var undo));
+        Assert.Equal(original, undo!.TextToType);
+    }
+
+    [Theory]
     [InlineData(true, 0)]
     [InlineData(true, 1)]
     [InlineData(true, 2)]

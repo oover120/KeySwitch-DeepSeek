@@ -133,6 +133,24 @@ public class LayoutConversionTests
         Assert.Equal(text, LayoutConverter.Convert(text, Ru, En));
     }
 
+    [Theory]
+    [InlineData(LayoutCatalog.EnUsId, ")!@#$%^&*(")]
+    [InlineData(LayoutCatalog.RuRuId, ")!\"№;%:?*(")]
+    public void NumberRow_MatchesWindowsVirtualKeys(string layoutId, string shiftedSymbols)
+    {
+        var layout = LayoutCatalog.TryGet(layoutId)!;
+        for (char digit = '0'; digit <= '9'; digit++)
+        {
+            Assert.True(layout.TryMap(digit, shift: false, out var unshifted));
+            Assert.Equal(digit, unshifted);
+            Assert.True(layout.TryMap(digit, shift: true, out var shifted));
+            Assert.Equal(shiftedSymbols[digit - '0'], shifted);
+            Assert.True(layout.TryGetKey(digit, out int key, out bool needsShift));
+            Assert.Equal((int)digit, key);
+            Assert.False(needsShift);
+        }
+    }
+
     [Fact]
     public void SpaceAndTab_AreStable()
     {
