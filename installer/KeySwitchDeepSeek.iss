@@ -7,12 +7,12 @@
 ; Сборка установщика: Inno Setup 6 → Compile, или
 ;   "%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" installer\KeySwitchDeepSeek.iss
 ; Версию можно передать снаружи, чтобы не править файл на каждый релиз:
-;   ISCC.exe /DMyAppVersion=1.2.9 installer\KeySwitchDeepSeek.iss
+;   ISCC.exe /DMyAppVersion=1.2.10 installer\KeySwitchDeepSeek.iss
 ; Перед этим должен быть выполнен publish.ps1 (incoming файлы в artifacts\publish).
 
 #define MyAppName "KeySwitch DeepSeek"
 #ifndef MyAppVersion
-  #define MyAppVersion "1.2.9"
+  #define MyAppVersion "1.2.10"
 #endif
 #define MyAppPublisher "oover120"
 #define MyAppExeName "KeySwitchDeepSeek.exe"
@@ -85,8 +85,8 @@ Name: "desktopicon"; Description: "{cm:DesktopIcon}"; GroupDescription: "{cm:Add
 Source: "..\artifacts\publish\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Comment: "{cm:AppName}"
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Comment: "{cm:AppName}"; Tasks: desktopicon
+Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--activate"; Comment: "{cm:AppName}"
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--activate"; Comment: "{cm:AppName}"; Tasks: desktopicon
 
 [Registry]
 ; Автозапуск через HKCU\...\Run — без планировщика и без прав администратора.

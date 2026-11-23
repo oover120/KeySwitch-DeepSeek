@@ -27,9 +27,8 @@ public partial class App : Application
     {
         base.OnStartup(e);
 
-        // Один экземпляр на сессию/машину. Второй запуск просто активирует первый.
-        // Исключение — перезапуск с повышением прав (--takeover): он забирает управление,
-        // иначе админский процесс молча выходил бы, а обычный продолжал работать без прав.
+        // Автозапуск и перезапуск после обновления могут пересечься с другим запуском.
+        // Только интерактивные ярлыки с --activate открывают настройки уже работающего экземпляра.
         _singleInstance = new SingleInstance();
         bool takeover = e.Args.Any(
             arg => string.Equals(arg, "--takeover", StringComparison.OrdinalIgnoreCase));
@@ -38,7 +37,9 @@ public partial class App : Application
                 ? !_singleInstance.TryAcquireWithTakeover(TimeSpan.FromSeconds(10))
                 : !_singleInstance.TryAcquire())
         {
-            SingleInstance.SignalExistingInstance();
+            if (e.Args.Contains("--activate", StringComparer.OrdinalIgnoreCase))
+                SingleInstance.SignalExistingInstance();
+
             Shutdown();
             return;
         }

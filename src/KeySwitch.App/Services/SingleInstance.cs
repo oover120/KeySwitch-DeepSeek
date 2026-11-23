@@ -4,8 +4,8 @@ namespace KeySwitch.App.Services;
 
 /// <summary>
 /// Один экземпляр приложения на пользовательскую сессию.
-/// Основной механизм — именованный Mutex. Дополнительно создаётся событие активации:
-/// второй экземпляр не просто выходит, а просит уже запущенный показать настройки.
+/// Основной механизм — именованный Mutex. Событие активации позволяет интерактивному
+/// ярлыку попросить уже запущенный экземпляр показать настройки.
 /// </summary>
 internal sealed class SingleInstance : IDisposable
 {
@@ -25,7 +25,7 @@ internal sealed class SingleInstance : IDisposable
     private RegisteredWaitHandle? _registeredTakeoverWait;
     private bool _disposed;
 
-    /// <summary>Запрошена активация (пользователь запустил второй экземпляр).</summary>
+    /// <summary>Пользователь запросил открытие окна настроек через ярлык.</summary>
     public event EventHandler? ActivationRequested;
 
     /// <summary>
