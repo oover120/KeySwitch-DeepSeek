@@ -450,8 +450,7 @@ public sealed class AutoSwitchService : IDisposable
                 return;
 
             case KeyRole.Reset:
-                ResetState();
-                _engine.ClearUndo();
+                ResetState(forgetLastWord: true);
                 return;
 
             case KeyRole.Backspace:

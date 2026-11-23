@@ -34,8 +34,11 @@ public sealed record CorrectionPlan(
     double Confidence,
     string Reason)
 {
+    /// <summary>Пробелы после завершающего символа, которые нужно восстановить.</summary>
+    public int AdditionalSpaces { get; init; }
+
     /// <summary>Строка, которая будет напечатана после удаления <see cref="DeleteCount"/> символов.</summary>
-    public string TextToType => Terminator is { } t ? ReplacementText + t : ReplacementText;
+    public string TextToType => (Terminator is { } t ? ReplacementText + t : ReplacementText) + new string(' ', AdditionalSpaces);
 
     public override string ToString()
         => $"{Kind}: '{OriginalText}' → '{TextToType}' (del {DeleteCount}, {SourceLayoutId}→{TargetLayoutId}, {Confidence:P0})";
@@ -51,5 +54,7 @@ public sealed record UndoPlan(
     string CurrentLayoutId,
     char? Terminator)
 {
-    public string TextToType => Terminator is { } t ? RestoreText + t : RestoreText;
+    public int AdditionalSpaces { get; init; }
+
+    public string TextToType => (Terminator is { } t ? RestoreText + t : RestoreText) + new string(' ', AdditionalSpaces);
 }

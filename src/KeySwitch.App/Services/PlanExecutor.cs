@@ -118,7 +118,7 @@ public sealed class PlanExecutor : IDisposable
 
                 Thread.Sleep(pauseMs);
 
-                var typing = _sender.SendTextAndTerminator(plan.ReplacementText, plan.Terminator);
+                var typing = _sender.SendTextAndTerminator(plan.ReplacementText, plan.Terminator, plan.AdditionalSpaces);
                 LogSend("ввод", typing);
             }
             else
@@ -130,7 +130,7 @@ public sealed class PlanExecutor : IDisposable
                 LogLayout(targetWindow, layoutBefore, switched);
 
                 var result = _sender.SendCorrection(
-                    plan.DeleteCount, plan.ReplacementText, plan.Terminator, pauseMs: 0);
+                    plan.DeleteCount, plan.ReplacementText, plan.Terminator, additionalSpaces: plan.AdditionalSpaces);
                 LogSend("Backspace+ввод", result);
             }
 
@@ -168,7 +168,7 @@ public sealed class PlanExecutor : IDisposable
             }
 
             var result = _sender.SendCorrection(
-                plan.DeleteCount, plan.RestoreText, plan.Terminator, pauseMs: 0);
+                plan.DeleteCount, plan.RestoreText, plan.Terminator, additionalSpaces: plan.AdditionalSpaces);
             LogSend("Отмена: Backspace+ввод", result);
 
             _logger.Info($"Отмена: завершено за {watch.Elapsed.TotalMilliseconds:0} мс");

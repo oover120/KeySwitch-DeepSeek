@@ -115,17 +115,18 @@ public sealed class InputSender : IDisposable
     /// Для браузеров и Electron-приложений пауза задаётся явно — там между удалением
     /// и вводом нужно дать странице обработать изменения (иначе часть Backspace теряется).
     /// </summary>
-    public SendResult SendCorrection(int backspaces, string text, char? terminator, int pauseMs = 0)
+    public SendResult SendCorrection(int backspaces, string text, char? terminator, int pauseMs = 0,
+        int additionalSpaces = 0)
     {
         int deleteCount = Math.Max(0, backspaces);
         text ??= string.Empty;
 
         if (pauseMs <= 0)
         {
-            var inputs = new List<NativeMethods.INPUT>(deleteCount * 2 + text.Length * 2 + 2);
+            var inputs = new List<NativeMethods.INPUT>(deleteCount * 2 + text.Length * 2 + 2 + additionalSpaces * 2);
             AddBackspaces(inputs, deleteCount);
             AddText(inputs, text);
-            AddTerminator(inputs, terminator);
+            AddTerminatorAndSpaces(inputs, terminator, additionalSpaces);
             return Send(inputs.ToArray());
         }
 
@@ -136,22 +137,19 @@ public sealed class InputSender : IDisposable
 
         Thread.Sleep(pauseMs);
 
-        var typing = new List<NativeMethods.INPUT>(text.Length * 2 + 2);
-        AddText(typing, text);
-        AddTerminator(typing, terminator);
-        return Send(typing.ToArray());
+        return SendTextAndTerminator(text, terminator, additionalSpaces);
     }
 
     /// <summary>
     /// Текст и завершающий символ одним пакетом SendInput (для двухфазного режима,
     /// когда удаление уже отправлено отдельно).
     /// </summary>
-    public SendResult SendTextAndTerminator(string text, char? terminator)
+    public SendResult SendTextAndTerminator(string text, char? terminator, int additionalSpaces = 0)
     {
         text ??= string.Empty;
-        var inputs = new List<NativeMethods.INPUT>(text.Length * 2 + 2);
+        var inputs = new List<NativeMethods.INPUT>(text.Length * 2 + 2 + additionalSpaces * 2);
         AddText(inputs, text);
-        AddTerminator(inputs, terminator);
+        AddTerminatorAndSpaces(inputs, terminator, additionalSpaces);
         return Send(inputs.ToArray());
     }
 
@@ -255,20 +253,25 @@ public sealed class InputSender : IDisposable
         }
     }
 
-    private static void AddTerminator(List<NativeMethods.INPUT> inputs, char? terminator)
+    private static void AddTerminatorAndSpaces(List<NativeMethods.INPUT> inputs, char? terminator, int additionalSpaces)
     {
-        if (terminator is not { } ch || ch == default)
-            return;
-
-        int virtualKey = VirtualKeyOf(ch);
-        if (virtualKey == 0)
+        if (terminator is { } ch && ch != default)
         {
-            AddText(inputs, ch.ToString());
-            return;
+            int virtualKey = VirtualKeyOf(ch);
+            if (virtualKey == 0)
+                AddText(inputs, ch.ToString());
+            else
+            {
+                inputs.Add(KeyInput((ushort)virtualKey, 0, 0));
+                inputs.Add(KeyInput((ushort)virtualKey, 0, NativeMethods.KEYEVENTF_KEYUP));
+            }
         }
 
-        inputs.Add(KeyInput((ushort)virtualKey, 0, 0));
-        inputs.Add(KeyInput((ushort)virtualKey, 0, NativeMethods.KEYEVENTF_KEYUP));
+        for (int i = 0; i < additionalSpaces; i++)
+        {
+            inputs.Add(KeyInput(0, ' ', NativeMethods.KEYEVENTF_UNICODE));
+            inputs.Add(KeyInput(0, ' ', NativeMethods.KEYEVENTF_UNICODE | NativeMethods.KEYEVENTF_KEYUP));
+        }
     }
 
     private static int VirtualKeyOf(char ch) => ch switch

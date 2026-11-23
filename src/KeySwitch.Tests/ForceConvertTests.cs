@@ -94,6 +94,46 @@ public class ForceConvertTests
         Assert.Equal("hello", engine.LastWord!.Text);
     }
 
+    [Theory]
+    [InlineData(true, 0)]
+    [InlineData(true, 1)]
+    [InlineData(true, 2)]
+    [InlineData(true, 3)]
+    [InlineData(false, 2)]
+    public void ForceConvert_PreservesAllSpacesWithoutLeavingOriginalPrefix(bool automatic, int spaces)
+    {
+        var settings = TestEnvironment.DefaultSettings();
+        settings.ConfidenceThreshold = 100;
+        var engine = CreateEngine(settings);
+        Type(engine, "пфьу", LayoutCatalog.RuRuId);
+        for (int i = 0; i < spaces; i++)
+            Assert.False(engine.CompleteWord(' ', terminatorAlreadyTyped: true, automaticInput: automatic).HasPlan);
+
+        const string beforeWord = "text: ";
+        string suffix = new(' ', spaces);
+        string field = beforeWord + "пфьу" + suffix;
+        var plan = Assert.IsType<CorrectionPlan>(engine.ForceConvert().Plan);
+        field = field[..^plan.DeleteCount] + plan.TextToType;
+        Assert.Equal(beforeWord + "game" + suffix, field);
+
+        Assert.True(engine.TryUndo(out var undo));
+        field = field[..^undo!.DeleteCount] + undo.TextToType;
+        Assert.Equal(beforeWord + "пфьу" + suffix, field);
+    }
+
+    [Fact]
+    public void TryUndo_KeepsSpacesTypedAfterAutomaticCorrection()
+    {
+        var engine = CreateEngine();
+        Type(engine, "ghbdtn", LayoutCatalog.EnUsId);
+        var plan = Assert.IsType<CorrectionPlan>(engine.CompleteWord(' ', terminatorAlreadyTyped: true).Plan);
+        Assert.False(engine.CompleteWord(' ', terminatorAlreadyTyped: true).HasPlan);
+
+        Assert.True(engine.TryUndo(out var undo));
+        Assert.Equal(plan.ReplacementText.Length + 2, undo!.DeleteCount);
+        Assert.Equal("ghbdtn  ", undo.TextToType);
+    }
+
     [Fact]
     public void ForceConvert_ShortWord_IgnoresMinimumLength()
     {

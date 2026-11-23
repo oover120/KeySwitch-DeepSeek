@@ -31,11 +31,12 @@ public sealed class CorrectionEngine
     private WordToken? _lastWord;
     private char? _lastTerminator;
     private bool _lastTerminatorTyped;
+    private int _additionalSpaces;
     private (string? Previous, string? Latest) _wordLanguages;
     private (string? Previous, string? Latest) _languagesBeforeLastWord;
     private (string Text, string LayoutId)? _erasedWord;
     private int _charactersLeftToErase;
-    private int _spacesAfterUnchangedWord;
+    private bool _learnRetypeAfterSpace;
 
     public CorrectionEngine(
         LayoutDetector detector,
@@ -64,7 +65,7 @@ public sealed class CorrectionEngine
 
     public void AppendChar(KeyStroke stroke, char character, string layoutId)
     {
-        _spacesAfterUnchangedWord = 0;
+        _learnRetypeAfterSpace = false;
         if (Buffer.IsEmpty)
             ClearUndo();
         if (_charactersLeftToErase != 0)
@@ -81,16 +82,18 @@ public sealed class CorrectionEngine
             _erasedWord = (Buffer.Text, Buffer.LayoutId);
             _charactersLeftToErase = Buffer.Length;
         }
-        else if (Buffer.IsEmpty && _spacesAfterUnchangedWord > 0 && _lastWord is { } last)
+        else if (Buffer.IsEmpty && _learnRetypeAfterSpace && _lastWord is { } last)
         {
             _erasedWord = (last.Text, last.LayoutId);
-            _charactersLeftToErase = last.Text.Length + _spacesAfterUnchangedWord;
-            _lastWord = null;
+            _charactersLeftToErase = last.Text.Length + 1 + _additionalSpaces;
         }
         else if (Buffer.IsEmpty && _charactersLeftToErase == 0)
             ClearRetype();
 
-        _spacesAfterUnchangedWord = 0;
+        _learnRetypeAfterSpace = false;
+        if (Buffer.IsEmpty)
+            ForgetLastWord();
+
         if (wholeWord)
         {
             Buffer.Clear();
@@ -118,13 +121,17 @@ public sealed class CorrectionEngine
         Buffer.Clear();
         ClearLanguageContext();
         ClearRetype();
-        if (!forgetLastWord)
-            return;
+        if (forgetLastWord)
+            ForgetLastWord();
+    }
 
+    private void ForgetLastWord()
+    {
         _lastWord = null;
         _lastTerminator = null;
         _lastTerminatorTyped = false;
-        LastApplied = null;
+        _additionalSpaces = 0;
+        ClearUndo();
     }
 
     /// <summary>Раннее срабатывание: проверка текущего недописанного слова.</summary>
@@ -155,6 +162,7 @@ public sealed class CorrectionEngine
         _lastWord = Buffer.ToToken();
         _lastTerminator = null;
         _lastTerminatorTyped = false;
+        _additionalSpaces = 0;
         Buffer.Clear();
         ClearLanguageContext();
         ClearRetype();
@@ -170,9 +178,12 @@ public sealed class CorrectionEngine
 
         if (Buffer.IsEmpty)
         {
-            if (automaticInput && terminator == ' ' && _spacesAfterUnchangedWord > 0)
-                _spacesAfterUnchangedWord++;
-            else
+            if (terminator == ' ' && terminatorAlreadyTyped && _lastWord is not null)
+                _additionalSpaces++;
+            else if (terminator.HasValue)
+                ForgetLastWord();
+
+            if (!automaticInput || terminator != ' ' || !_learnRetypeAfterSpace)
                 ClearRetype();
             return EngineResult.Empty;
         }
@@ -182,6 +193,7 @@ public sealed class CorrectionEngine
         _lastWord = token;
         _lastTerminator = terminator;
         _lastTerminatorTyped = terminatorAlreadyTyped;
+        _additionalSpaces = 0;
 
         var reason = "автопереключение выключено";
         CorrectionPlan? plan = null;
@@ -197,8 +209,7 @@ public sealed class CorrectionEngine
         }
 
         ClearRetype();
-        if (automaticInput && plan == null && terminator == ' ')
-            _spacesAfterUnchangedWord = 1;
+        _learnRetypeAfterSpace = automaticInput && plan == null && terminator == ' ' && terminatorAlreadyTyped;
 
         if (plan == null)
         {
@@ -227,6 +238,7 @@ public sealed class CorrectionEngine
         if (plan == null)
             return new EngineResult(_lastWord, null, "конвертация не требуется");
 
+        plan = IncludeAdditionalSpaces(plan);
         LastApplied = plan;
         return new EngineResult(_lastWord, plan, plan.Reason);
     }
@@ -247,6 +259,7 @@ public sealed class CorrectionEngine
             _lastWord = current;
             _lastTerminator = null;
             _lastTerminatorTyped = false;
+            _additionalSpaces = 0;
 
             var currentPlan = BuildForcedPlan(current, null, terminatorAlreadyTyped: false);
             if (currentPlan == null)
@@ -263,6 +276,7 @@ public sealed class CorrectionEngine
         if (plan == null)
             return new EngineResult(token, null, "конвертация не требуется");
 
+        plan = IncludeAdditionalSpaces(plan);
         LastApplied = plan;
         return new EngineResult(token, plan, plan.Reason);
     }
@@ -280,6 +294,7 @@ public sealed class CorrectionEngine
 
         ClearLanguageContext();
         ClearRetype();
+        ForgetLastWord();
         var plan = new CorrectionPlan(
             CorrectionKind.Selection,
             text,
@@ -311,10 +326,13 @@ public sealed class CorrectionEngine
             applied.Kind,
             applied.ReplacementText,
             applied.OriginalText,
-            applied.ReplacementText.Length + terminatorLength,
+            applied.ReplacementText.Length + terminatorLength + _additionalSpaces,
             restoreLayout,
             currentLayout,
-            applied.Terminator);
+            applied.Terminator)
+        {
+            AdditionalSpaces = _additionalSpaces,
+        };
 
         _learning.RecordUndo(applied.OriginalText, applied.SourceLayoutId, applied.TargetLayoutId,
             keepOriginal: confirmOriginal && applied.Kind == CorrectionKind.LayoutSwitch && applied.Terminator.HasValue);
@@ -327,6 +345,10 @@ public sealed class CorrectionEngine
 
     /// <summary>Сбрасывает доступность отмены (например, пользователь начал новое слово).</summary>
     public void ClearUndo() => LastApplied = null;
+
+    private CorrectionPlan IncludeAdditionalSpaces(CorrectionPlan plan) => _additionalSpaces == 0
+        ? plan
+        : plan with { DeleteCount = plan.DeleteCount + _additionalSpaces, AdditionalSpaces = _additionalSpaces };
 
     private CorrectionPlan? BuildForcedPlan(WordToken token, char? terminator, bool terminatorAlreadyTyped)
     {
@@ -489,7 +511,7 @@ public sealed class CorrectionEngine
     {
         _erasedWord = null;
         _charactersLeftToErase = 0;
-        _spacesAfterUnchangedWord = 0;
+        _learnRetypeAfterSpace = false;
     }
 
     private void RememberWordLanguage(string text, char? terminator)
