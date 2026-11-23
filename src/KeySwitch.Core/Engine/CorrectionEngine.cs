@@ -423,6 +423,15 @@ public sealed class CorrectionEngine
         var deleteCount = text.Length + (terminatorAlreadyTyped && terminator.HasValue ? 1 : 0);
         if (learned.Length != 0)
         {
+            if (_learning.TryGetManualCorrection(learned, target.Id, source.Id, out var reverse) &&
+                string.Equals(reverse, text, StringComparison.OrdinalIgnoreCase) &&
+                (_detector.GetKnownLanguage(learned.ToLowerInvariant()) != target.Language ||
+                 _detector.GetKnownLanguage(text.ToLowerInvariant()) == source.Language))
+            {
+                reason = "встречные правила обучения, исходное слово оставлено";
+                return null;
+            }
+
             reason = "подтверждённое ручное исправление";
             return new CorrectionPlan(CorrectionKind.LayoutSwitch, text, learned, deleteCount, terminator,
                 source.Id, target.Id, 1.0, reason);

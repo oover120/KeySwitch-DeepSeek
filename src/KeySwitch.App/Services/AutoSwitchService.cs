@@ -692,7 +692,8 @@ public sealed class AutoSwitchService : IDisposable
             return false;
         }
 
-        _executor.ExecuteUndo(plan, _tracker.Get().Handle);
+        var info = _tracker.Get();
+        _executor.ExecuteUndo(plan, info.Handle, info.ProcessName);
         PlayFixSound();
         _logger.Debug($"Отмена исправления ({reason}).");
         return true;

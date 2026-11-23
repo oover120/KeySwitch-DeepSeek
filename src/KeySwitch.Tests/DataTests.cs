@@ -177,6 +177,34 @@ public class DataTests
         Assert.False(store.TryGetManualCorrection("ghbdtn", en, ru, out _));
     }
 
+    [Fact]
+    public void Engine_ReciprocalLearnedCorrections_PreferTheDictionaryWord()
+    {
+        using var temp = new TempDir();
+        var paths = new AppPaths(temp.Path);
+        var logger = new AppLogger(paths, safeMode: true);
+        var appSettings = new AppSettings();
+        const string en = LayoutCatalog.EnUsId;
+        const string ru = LayoutCatalog.RuRuId;
+        var store = new LearningStore(paths, logger, appSettings);
+        Assert.True(store.RecordManualCorrection("пфьу", "game", ru, en));
+        Assert.True(store.RecordManualCorrection("game", "пфьу", en, ru));
+
+        store = new LearningStore(paths, logger, appSettings);
+        store.Load();
+        var settings = TestEnvironment.DefaultSettings();
+        var resources = new TestLanguageResources(["привет"], ["game"]);
+        var detector = new LayoutDetector(resources, LayoutPairRegistry.CreateDefault(), settings);
+        var engine = new CorrectionEngine(detector, settings, store, NullExceptionPolicy.Instance,
+            new PostProcessorPipeline(Array.Empty<IPostProcessor>()));
+
+        Assert.Equal("game ", CompleteInput(engine, "пфьу", ru).Plan?.TextToType);
+        Assert.False(CompleteInput(engine, "game", en).HasPlan);
+        Assert.False(CompleteInput(engine, "GAME", en).HasPlan);
+        Assert.Equal("ПФЬУ ", engine.ForceConvert().Plan?.TextToType);
+        Assert.Equal("game ", CompleteInput(engine, "пфьу", ru).Plan?.TextToType);
+    }
+
     [Theory]
     [InlineData(false, false)]
     [InlineData(true, false)]

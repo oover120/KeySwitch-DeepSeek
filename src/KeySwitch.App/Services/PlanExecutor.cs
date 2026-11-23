@@ -89,9 +89,8 @@ public sealed class PlanExecutor : IDisposable
     /// Немедленное исправление на текущем потоке. Вызывать только с потока PlanExecutor
     /// (изнутри <see cref="ExecuteExclusive"/>) — иначе нарушится очередь нажатий.
     ///
-    /// Порядок (требование ТЗ): пробел пользователя уже ушёл в окно → Backspace × (слово + 1)
-    /// → смена раскладки → слово и пробел. Для браузеров и Electron между стиранием и
-    /// вводом выдерживается пауза, иначе часть Backspace теряется.
+    /// В браузере заменяем выделенный диапазон за один проход. В окнах, где нужен Backspace,
+    /// сохраняем обычный порядок стирания, переключения раскладки и ввода.
     /// </summary>
     public void ExecutePlanNow(CorrectionPlan plan, IntPtr targetWindow, string processName = "")
     {
@@ -107,16 +106,34 @@ public sealed class PlanExecutor : IDisposable
 
         try
         {
-            if (pauseMs > 0)
+            bool useSelection = CanSelectPreviousText(processName, plan.DeleteCount, plan.Terminator);
+            if (!IsTargetActive(targetWindow))
+                return;
+
+            if (useSelection)
+            {
+                var replacement = _sender.SendSelectedCorrection(
+                    plan.DeleteCount, plan.ReplacementText, plan.Terminator, plan.AdditionalSpaces);
+                LogSend("выделение+ввод", replacement);
+                if (!replacement.Complete || !IsTargetActive(targetWindow))
+                    return;
+
+                LogLayout(targetWindow, layoutBefore, EnsureLayout(targetWindow, plan));
+            }
+            else if (pauseMs > 0)
             {
                 // Двухфазный режим: стереть → сменить раскладку → пауза → напечатать.
                 var erase = _sender.SendBackspaces(plan.DeleteCount);
                 LogSend("Backspace", erase);
+                if (!erase.Complete || !IsTargetActive(targetWindow))
+                    return;
 
                 bool switched = EnsureLayout(targetWindow, plan);
                 LogLayout(targetWindow, layoutBefore, switched);
 
                 Thread.Sleep(pauseMs);
+                if (!IsTargetActive(targetWindow))
+                    return;
 
                 var typing = _sender.SendTextAndTerminator(plan.ReplacementText, plan.Terminator, plan.AdditionalSpaces);
                 LogSend("ввод", typing);
@@ -128,6 +145,8 @@ public sealed class PlanExecutor : IDisposable
                 // попасть в окно одним SendInput.
                 bool switched = EnsureLayout(targetWindow, plan);
                 LogLayout(targetWindow, layoutBefore, switched);
+                if (!IsTargetActive(targetWindow))
+                    return;
 
                 var result = _sender.SendCorrection(
                     plan.DeleteCount, plan.ReplacementText, plan.Terminator, additionalSpaces: plan.AdditionalSpaces);
@@ -146,11 +165,11 @@ public sealed class PlanExecutor : IDisposable
     }
 
     /// <summary>Ставит в очередь отмену исправления.</summary>
-    public void ExecuteUndo(UndoPlan plan, IntPtr targetWindow)
-        => ExecuteExclusive(() => ExecuteUndoNow(plan, targetWindow));
+    public void ExecuteUndo(UndoPlan plan, IntPtr targetWindow, string processName = "")
+        => ExecuteExclusive(() => ExecuteUndoNow(plan, targetWindow, processName));
 
     /// <summary>Немедленная отмена на текущем потоке (только с потока PlanExecutor).</summary>
-    public void ExecuteUndoNow(UndoPlan plan, IntPtr targetWindow)
+    public void ExecuteUndoNow(UndoPlan plan, IntPtr targetWindow, string processName = "")
     {
         var watch = Stopwatch.StartNew();
         string layoutBefore = SafeLayoutId(targetWindow);
@@ -160,6 +179,19 @@ public sealed class PlanExecutor : IDisposable
 
         try
         {
+            bool useSelection = CanSelectPreviousText(processName, plan.DeleteCount, plan.Terminator);
+            if (!IsTargetActive(targetWindow))
+                return;
+
+            if (useSelection)
+            {
+                var replacement = _sender.SendSelectedCorrection(
+                    plan.DeleteCount, plan.RestoreText, plan.Terminator, plan.AdditionalSpaces);
+                LogSend("отмена: выделение+ввод", replacement);
+                if (!replacement.Complete || !IsTargetActive(targetWindow))
+                    return;
+            }
+
             if (!string.IsNullOrWhiteSpace(plan.RestoreLayoutId) &&
                 !string.Equals(plan.RestoreLayoutId, plan.CurrentLayoutId, StringComparison.OrdinalIgnoreCase))
             {
@@ -167,9 +199,12 @@ public sealed class PlanExecutor : IDisposable
                 LogLayout(targetWindow, layoutBefore, switched);
             }
 
-            var result = _sender.SendCorrection(
-                plan.DeleteCount, plan.RestoreText, plan.Terminator, additionalSpaces: plan.AdditionalSpaces);
-            LogSend("Отмена: Backspace+ввод", result);
+            if (!useSelection && IsTargetActive(targetWindow))
+            {
+                var result = _sender.SendCorrection(
+                    plan.DeleteCount, plan.RestoreText, plan.Terminator, additionalSpaces: plan.AdditionalSpaces);
+                LogSend("Отмена: Backspace+ввод", result);
+            }
 
             _logger.Info($"Отмена: завершено за {watch.Elapsed.TotalMilliseconds:0} мс");
         }
@@ -179,6 +214,28 @@ public sealed class PlanExecutor : IDisposable
             throw;
         }
     }
+
+    private static bool CanSelectPreviousText(string processName, int count, char? terminator)
+    {
+        if (count <= 0 || terminator is not (null or ' ') || !CorrectionPacing.IsBrowser(processName))
+            return false;
+
+        // Событие отпускания второго Shift может дойти до рабочего потока раньше,
+        // чем Windows обновит состояние клавиши. Даём ему завершиться перед выделением.
+        long deadline = Environment.TickCount64 + 20;
+        while (InputSender.HasActiveModifiers())
+        {
+            if (Environment.TickCount64 >= deadline)
+                return false;
+
+            Thread.Sleep(1);
+        }
+
+        return true;
+    }
+
+    private static bool IsTargetActive(IntPtr window) =>
+        window != IntPtr.Zero && WindowInspector.GetForegroundHandle() == window;
 
     /// <summary>Произвольная работа, во время которой нажатия пользователя откладываются.</summary>
     public void ExecuteExclusive(Action work)

@@ -24,6 +24,8 @@ public readonly record struct SendResult(int Sent, int Inserted, int LastError)
 /// </summary>
 public sealed class InputSender : IDisposable
 {
+    private const ushort VkLeft = 0x25;
+
     /// <summary>
     /// Маркер «своё» событие в dwExtraInfo. Формат: 0x4B53_0001 («KS» = KeySwitch).
     /// </summary>
@@ -37,6 +39,13 @@ public sealed class InputSender : IDisposable
 
     private readonly object _gate = new();
     private bool _disposed;
+
+    public static bool HasActiveModifiers() =>
+        NativeMethods.GetAsyncKeyState(NativeMethods.VK_SHIFT) < 0 ||
+        NativeMethods.GetAsyncKeyState(NativeMethods.VK_CONTROL) < 0 ||
+        NativeMethods.GetAsyncKeyState(NativeMethods.VK_MENU) < 0 ||
+        NativeMethods.GetAsyncKeyState(NativeMethods.VK_LWIN) < 0 ||
+        NativeMethods.GetAsyncKeyState(NativeMethods.VK_RWIN) < 0;
 
     /// <summary>Отправляет <paramref name="count"/> нажатий Backspace (один пакет SendInput).</summary>
     public SendResult SendBackspaces(int count)
@@ -151,6 +160,33 @@ public sealed class InputSender : IDisposable
         AddText(inputs, text);
         AddTerminatorAndSpaces(inputs, terminator, additionalSpaces);
         return Send(inputs.ToArray());
+    }
+
+    /// <summary>Выделяет символы перед курсором и заменяет выделение за один пакет ввода.</summary>
+    public SendResult SendSelectedCorrection(int count, string text, char? terminator, int additionalSpaces)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(count);
+        int selectionEvents = 2 + count * 2;
+        var inputs = new List<NativeMethods.INPUT>(selectionEvents + text.Length * 2 + 2 + additionalSpaces * 2);
+        const uint extended = NativeMethods.KEYEVENTF_EXTENDEDKEY;
+        const uint keyUp = NativeMethods.KEYEVENTF_KEYUP;
+
+        inputs.Add(KeyInput(NativeMethods.VK_LSHIFT, 0, 0));
+        for (int i = 0; i < count; i++)
+        {
+            inputs.Add(KeyInput(VkLeft, 0, extended));
+            inputs.Add(KeyInput(VkLeft, 0, extended | keyUp));
+        }
+        inputs.Add(KeyInput(NativeMethods.VK_LSHIFT, 0, keyUp));
+
+        AddText(inputs, text);
+        AddTerminatorAndSpaces(inputs, terminator, additionalSpaces);
+
+        var result = Send(inputs.ToArray());
+        if (result.Inserted > 0 && result.Inserted < selectionEvents)
+            SendKeyStroke(NativeMethods.VK_LSHIFT, shift: false, keyUp: true);
+
+        return result;
     }
 
     public void Dispose()
